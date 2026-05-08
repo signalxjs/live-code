@@ -48,7 +48,7 @@
         "sucrase": "^3.35.0"
     },
     "devDependencies": {
-        "@shikijs/langs": "^3.21.0",
+        "@shikijs/langs": "^4.0.2",
         "@shikijs/monaco": "^3.7.0",
         "@shikijs/themes": "^3.21.0",
         "@sigx/monaco-editor": "^0.1.0",

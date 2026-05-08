@@ -4,7 +4,7 @@
  * Monaco Editor type definitions for SignalX packages.
  * Generated using dts-bundle-generator from actual source files.
  * 
- * Generated: 2026-05-08T11:39:14.251Z
+ * Generated: 2026-05-08T11:51:17.839Z
  * 
  * To regenerate: pnpm run generate:types
  */

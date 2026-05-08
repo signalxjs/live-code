@@ -7,15 +7,13 @@
  * npm. Skips a package if its current version is already on the registry.
  *
  * Usage:
- *   node scripts/publish.js [--dry-run] [--tag <tag>] [--provenance] [--skip-bundle]
+ *   node scripts/publish.js [--dry-run] [--tag <tag>] [--provenance]
  *
  * Options:
  *   --dry-run       Run `pnpm pack --dry-run` instead of `pnpm publish`.
  *   --tag <tag>     Publish under an npm dist-tag (e.g. beta, next).
  *   --provenance    Attach an npm provenance attestation. Requires running in a
  *                   GitHub Actions workflow with `permissions: id-token: write`.
- *   --skip-bundle   Skip the monaco-bundle regeneration step (useful in CI when
- *                   the prebuilt bundle is already committed).
  *
  * Environment Variables:
  *   NPM_TOKEN    npm automation token. Optional — only needed for local
@@ -35,8 +33,7 @@ const packagesDir = join(rootDir, 'packages');
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
-const skipBundle = args.includes('--skip-bundle');
-const provenance = args.includes('--provenance') || process.env.NPM_CONFIG_PROVENANCE === 'true';
+const provenance= args.includes('--provenance') || process.env.NPM_CONFIG_PROVENANCE === 'true';
 const tagIndex = args.indexOf('--tag');
 const tag = tagIndex !== -1 ? args[tagIndex + 1] : null;
 
@@ -129,19 +126,6 @@ function isAlreadyPublished(name, version) {
     }
 }
 
-function runMonacoBundle() {
-    if (skipBundle) {
-        console.log('⏭️  --skip-bundle set, skipping monaco-bundle regeneration\n');
-        return;
-    }
-    console.log('📦 Regenerating monaco-bundle...');
-    execSync('pnpm --filter @sigx/live-code run bundle:monaco', {
-        cwd: rootDir,
-        stdio: 'inherit'
-    });
-    console.log('✅ Bundle ready\n');
-}
-
 function publishPackage(pkg) {
     console.log(`\n📦 ${dryRun ? 'Would publish' : 'Publishing'}: ${pkg.name}@${pkg.version}`);
     console.log(`   Path: ${pkg.path}`);
@@ -188,8 +172,6 @@ async function main() {
             throw new Error('npm login required');
         }
     }
-
-    runMonacoBundle();
 
     console.log('🔨 Building all packages...');
     try {

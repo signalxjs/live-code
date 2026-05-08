@@ -59,7 +59,7 @@ jobs:
       - name: Publish to npm
         env:
           NPM_CONFIG_PROVENANCE: 'true'
-        run: node scripts/publish.js --skip-bundle
+        run: node scripts/publish.js
 
   github-release:
     needs: publish-npm

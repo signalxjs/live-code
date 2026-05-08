@@ -1,17 +1,17 @@
 {
     "name": "@sigx/live-code",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Live code blocks for sigx documentation — interactive code examples with a prebundled Monaco editor",
     "type": "module",
-    "main": "./src/index.ts",
+    "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "import": "./src/index.ts",
+            "import": "./dist/index.js",
             "types": "./dist/index.d.ts"
         },
         "./client": {
-            "import": "./src/client.tsx",
+            "import": "./dist/client.js",
             "types": "./dist/client.d.ts"
         },
         "./styles": {

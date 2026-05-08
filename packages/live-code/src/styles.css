@@ -1,0 +1,774 @@
+/**
+ * @sigx/live-code styles
+ * 
+ * Import this in your app:
+ * import '@sigx/live-code/styles';
+ */
+
+/* Container */
+.live-code-block {
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    margin: 1rem 0;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Header */
+.live-code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: #181825;
+    border-bottom: 1px solid #313244;
+}
+
+.live-code-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.live-code-dots {
+    display: flex;
+    gap: 0.375rem;
+}
+
+.live-code-dots .dot {
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+}
+
+.live-code-dots .dot-red {
+    background: #f38ba8;
+}
+
+.live-code-dots .dot-yellow {
+    background: #f9e2af;
+}
+
+.live-code-dots .dot-green {
+    background: #a6e3a1;
+}
+
+.live-code-filename,
+.live-code-lang {
+    font-size: 0.75rem;
+    color: #6c7086;
+    font-weight: 500;
+}
+
+/* Action buttons */
+.live-code-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.live-code-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #cdd6f4;
+    background: #313244;
+    border: 1px solid #45475a;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.live-code-btn:hover {
+    background: #45475a;
+    border-color: #585b70;
+}
+
+.live-code-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.live-code-btn-run {
+    background: #89b4fa;
+    color: #1e1e2e;
+    border-color: #89b4fa;
+}
+
+.live-code-btn-run:hover {
+    background: #b4befe;
+    border-color: #b4befe;
+}
+
+.live-code-btn-edit {
+    background: #a6e3a1;
+    color: #1e1e2e;
+    border-color: #a6e3a1;
+}
+
+.live-code-btn-edit:hover {
+    background: #94e2d5;
+    border-color: #94e2d5;
+}
+
+/* Code content */
+.live-code-content {
+    position: relative;
+}
+
+.live-code-static {
+    overflow-x: auto;
+}
+
+.live-code-static pre {
+    margin: 0;
+    padding: 1rem;
+}
+
+.live-code-static code {
+    font-family: 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+}
+
+.live-code-pre {
+    margin: 0;
+    padding: 1rem;
+    background: #1e1e2e;
+    color: #cdd6f4;
+    overflow-x: auto;
+}
+
+.live-code-pre code {
+    font-family: 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    white-space: pre;
+}
+
+.live-code-editor {
+    width: 100%;
+    min-height: 200px;
+}
+
+/* Error display */
+.live-code-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: rgba(243, 139, 168, 0.1);
+    border-top: 1px solid #f38ba8;
+    color: #f38ba8;
+    font-size: 0.875rem;
+}
+
+.live-code-error-icon {
+    flex-shrink: 0;
+}
+
+.live-code-error-text {
+    font-family: 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+    word-break: break-word;
+}
+
+/* Preview area */
+.live-code-preview-wrapper {
+    border-top: 1px solid #313244;
+}
+
+.live-code-preview-label {
+    padding: 0.5rem 1rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #6c7086;
+    background: #181825;
+    border-bottom: 1px solid #313244;
+}
+
+.live-code-preview {
+    padding: 1rem;
+    background: #ffffff;
+    color: #1e1e2e;
+    min-height: 60px;
+}
+
+/* Dark mode preview variant */
+.live-code-preview-dark {
+    background: #1e1e2e;
+    color: #cdd6f4;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+    .live-code-header {
+        flex-direction: column;
+        gap: 0.75rem;
+        align-items: flex-start;
+    }
+    
+    .live-code-actions {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+}
+
+/* ============================================================
+   LiveCodeWindow - Code block with "Try Live" button
+   ============================================================ */
+
+.live-code-window {
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    margin: 1rem 0;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.live-code-window-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: #181825;
+    border-bottom: 1px solid #313244;
+}
+
+.live-code-window-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.live-code-window-dots {
+    display: flex;
+    gap: 0.375rem;
+}
+
+.live-code-window-dots .dot {
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+}
+
+.live-code-window-dots .dot-red {
+    background: #f38ba8;
+}
+
+.live-code-window-dots .dot-yellow {
+    background: #f9e2af;
+}
+
+.live-code-window-dots .dot-green {
+    background: #a6e3a1;
+}
+
+.live-code-window-filename,
+.live-code-window-lang {
+    font-size: 0.75rem;
+    color: #6c7086;
+    font-weight: 500;
+}
+
+.live-code-window-content {
+    overflow-x: auto;
+}
+
+.live-code-window-content pre {
+    margin: 0;
+    padding: 1rem;
+}
+
+.live-code-try-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #1e1e2e;
+    background: linear-gradient(135deg, #f9e2af 0%, #fab387 100%);
+    border: none;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.live-code-try-btn:hover {
+    background: linear-gradient(135deg, #fab387 0%, #f38ba8 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.live-code-try-btn:active {
+    transform: translateY(0);
+}
+
+/* ============================================================
+   PlaygroundModal - Full-screen playground dialog
+   ============================================================ */
+
+.playground-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.playground-modal {
+    width: 100%;
+    max-width: 1400px;
+    height: 90vh;
+    max-height: 800px;
+    background: #1e1e2e;
+    border-radius: 1rem;
+    border: 1px solid #313244;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.playground-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: #181825;
+    border-bottom: 1px solid #313244;
+}
+
+.playground-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: #cdd6f4;
+}
+
+.playground-modal-icon {
+    font-size: 1.25rem;
+}
+
+.playground-modal-filename {
+    font-size: 0.75rem;
+    color: #6c7086;
+    font-weight: 400;
+    margin-left: 0.5rem;
+    padding: 0.125rem 0.5rem;
+    background: #313244;
+    border-radius: 0.25rem;
+}
+
+.playground-modal-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.playground-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #cdd6f4;
+    background: #313244;
+    border: 1px solid #45475a;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.playground-btn:hover {
+    background: #45475a;
+    border-color: #585b70;
+}
+
+.playground-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.playground-btn-run {
+    background: #89b4fa;
+    color: #1e1e2e;
+    border-color: #89b4fa;
+}
+
+.playground-btn-run:hover {
+    background: #b4befe;
+    border-color: #b4befe;
+}
+
+.playground-btn-close {
+    background: transparent;
+    border-color: transparent;
+    color: #6c7086;
+    padding: 0.5rem;
+}
+
+.playground-btn-close:hover {
+    color: #f38ba8;
+    background: rgba(243, 139, 168, 0.1);
+}
+
+.playground-modal-content {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+.playground-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.playground-editor-panel {
+    flex: 1;
+    border-right: 1px solid #313244;
+}
+
+.playground-preview-panel {
+    flex: 1;
+}
+
+.playground-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6c7086;
+    background: #181825;
+    border-bottom: 1px solid #313244;
+}
+
+.playground-error-badge {
+    padding: 0.125rem 0.5rem;
+    font-size: 0.625rem;
+    font-weight: 600;
+    color: #1e1e2e;
+    background: #f38ba8;
+    border-radius: 0.25rem;
+}
+
+.playground-editor {
+    flex: 1;
+    min-height: 0;
+}
+
+.playground-preview-content {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.playground-preview {
+    flex: 1;
+    padding: 1rem;
+    background: #ffffff;
+    color: #1e1e2e;
+}
+
+.playground-error {
+    padding: 1rem;
+    background: rgba(243, 139, 168, 0.1);
+    border-bottom: 1px solid #f38ba8;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+.playground-error-icon {
+    flex-shrink: 0;
+}
+
+.playground-error-text {
+    margin: 0;
+    font-family: 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+    font-size: 0.875rem;
+    color: #f38ba8;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.playground-modal-footer {
+    padding: 0.5rem 1rem;
+    background: #181825;
+    border-top: 1px solid #313244;
+}
+
+.playground-hint {
+    font-size: 0.75rem;
+    color: #6c7086;
+}
+
+/* Responsive - stack panels on mobile */
+@media (max-width: 768px) {
+    .playground-modal {
+        height: 100vh;
+        max-height: none;
+        border-radius: 0;
+    }
+    
+    .playground-modal-content {
+        flex-direction: column;
+    }
+    
+    .playground-editor-panel {
+        border-right: none;
+        border-bottom: 1px solid #313244;
+        height: 50%;
+    }
+    
+    .playground-preview-panel {
+        height: 50%;
+    }
+}
+
+/* ============================================
+ * LivePreview - Inline component preview
+ * ============================================ */
+
+.live-preview-island {
+    margin: 1rem 0;
+}
+
+.live-preview {
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Header with tabs */
+.live-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0;
+    background: #181825;
+    border-bottom: 1px solid #313244;
+}
+
+/* Tabs */
+.live-preview-tabs {
+    display: flex;
+    gap: 0;
+}
+
+.live-preview-tab {
+    padding: 0.75rem 1.25rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #6c7086;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+
+.live-preview-tab:hover {
+    color: #cdd6f4;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.live-preview-tab.active {
+    color: #89b4fa;
+    border-bottom-color: #89b4fa;
+}
+
+/* Actions */
+.live-preview-actions {
+    display: flex;
+    gap: 0.5rem;
+    padding-right: 0.75rem;
+}
+
+.live-preview-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #cdd6f4;
+    background: #313244;
+    border: 1px solid #45475a;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.live-preview-btn:hover:not(:disabled) {
+    background: #45475a;
+    border-color: #585b70;
+}
+
+.live-preview-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.live-preview-btn-edit {
+    background: #a6e3a1;
+    color: #1e1e2e;
+    border-color: #a6e3a1;
+}
+
+.live-preview-btn-edit:hover:not(:disabled) {
+    background: #94e2d5;
+    border-color: #94e2d5;
+}
+
+/* Content area */
+.live-preview-content {
+    position: relative;
+}
+
+/* Tab panes */
+.live-preview-pane {
+    display: none;
+}
+
+.live-preview-pane.active {
+    display: block;
+}
+
+/* Preview pane */
+.live-preview-pane-preview {
+    background: #ffffff;
+    color: #1e1e2e;
+}
+
+.live-preview-container {
+    padding: 1.5rem;
+    min-height: 100px;
+    height: auto;
+}
+
+/* Code pane */
+.live-preview-pane-code {
+    background: #1e1e2e;
+}
+
+.live-preview-code {
+    overflow-x: auto;
+}
+
+.live-preview-code pre {
+    margin: 0;
+    padding: 1rem;
+}
+
+.live-preview-code code {
+    font-family: 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+}
+
+/* Loading state */
+.live-preview-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    color: #6c7086;
+    font-size: 0.875rem;
+}
+
+.live-preview-spinner {
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid #313244;
+    border-top-color: #89b4fa;
+    border-radius: 50%;
+    animation: live-preview-spin 0.6s linear infinite;
+}
+
+@keyframes live-preview-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Error state */
+.live-preview-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1rem;
+    margin: 1rem;
+    background: rgba(243, 139, 168, 0.1);
+    border: 1px solid #f38ba8;
+    border-radius: 0.5rem;
+}
+
+.live-preview-error-icon {
+    flex-shrink: 0;
+}
+
+.live-preview-error-text {
+    margin: 0;
+    font-family: 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+    font-size: 0.8125rem;
+    color: #f38ba8;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Light theme support */
+[data-theme="light"] .live-preview,
+.light .live-preview {
+    background: #f5f5f5;
+    border-color: #e0e0e0;
+}
+
+[data-theme="light"] .live-preview-header,
+.light .live-preview-header {
+    background: #fafafa;
+    border-color: #e0e0e0;
+}
+
+[data-theme="light"] .live-preview-tab,
+.light .live-preview-tab {
+    color: #666;
+}
+
+[data-theme="light"] .live-preview-tab:hover,
+.light .live-preview-tab:hover {
+    color: #333;
+    background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] .live-preview-tab.active,
+.light .live-preview-tab.active {
+    color: #2563eb;
+    border-bottom-color: #2563eb;
+}
+
+[data-theme="light"] .live-preview-pane-code,
+.light .live-preview-pane-code {
+    background: #fafafa;
+}

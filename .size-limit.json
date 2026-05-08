@@ -1,0 +1,8 @@
+[
+  {
+    "name": "@sigx/live-code (runtime + components, eager chunk)",
+    "path": "packages/live-code/dist/index.js",
+    "limit": "200 KB",
+    "ignore": ["sigx", "@sigx/monaco-editor", "monaco-editor", "shiki", "@shikijs/monaco", "@shikijs/langs", "@shikijs/themes", "sucrase", "@sigx/router", "@sigx/store", "@sigx/daisyui"]
+  }
+]

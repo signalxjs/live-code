@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+        "target": "ESNext",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "strict": true,
+        "jsx": "react-jsx",
+        "jsxImportSource": "sigx",
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "paths": {
+            "@sigx/live-code": ["./packages/live-code/src/index.ts"],
+            "@sigx/live-code/client": ["./packages/live-code/src/client.tsx"],
+            "@sigx/live-code/vite-plugin": ["./packages/live-code/src/vite-plugin.ts"]
+        }
+    },
+    "exclude": ["node_modules", "**/dist"]
+}

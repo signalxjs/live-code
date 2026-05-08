@@ -1,0 +1,86 @@
+{
+    "name": "@sigx/live-code",
+    "version": "0.1.0",
+    "description": "Live code blocks for sigx documentation — interactive code examples with a prebundled Monaco editor",
+    "type": "module",
+    "main": "./src/index.ts",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": "./src/index.ts",
+            "types": "./dist/index.d.ts"
+        },
+        "./client": {
+            "import": "./src/client.tsx",
+            "types": "./dist/client.d.ts"
+        },
+        "./styles": {
+            "import": "./src/styles.css"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "scripts": {
+        "build": "tsx scripts/generate-types.ts && vite build && tsgo --emitDeclarationOnly",
+        "dev": "vite build --watch",
+        "generate:types": "tsx scripts/generate-types.ts"
+    },
+    "keywords": [
+        "sigx",
+        "live-code",
+        "playground",
+        "documentation"
+    ],
+    "author": "Andreas Ekdahl",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/signalxjs/live-code.git",
+        "directory": "packages/live-code"
+    },
+    "homepage": "https://github.com/signalxjs/live-code",
+    "bugs": {
+        "url": "https://github.com/signalxjs/live-code/issues"
+    },
+    "dependencies": {
+        "sucrase": "^3.35.0"
+    },
+    "devDependencies": {
+        "@shikijs/langs": "^3.21.0",
+        "@shikijs/monaco": "^3.7.0",
+        "@shikijs/themes": "^3.21.0",
+        "@sigx/monaco-editor": "^0.1.0",
+        "@sigx/vite": "^0.4.1",
+        "@types/node": "^22.19.1",
+        "dts-bundle-generator": "^9.5.1",
+        "shiki": "^3.7.0",
+        "sigx": "^0.4.1",
+        "tsx": "^4.19.0",
+        "typescript": "^5.9.3",
+        "vite": "^8.0.3"
+    },
+    "peerDependencies": {
+        "@shikijs/langs": ">=3.7.0",
+        "@shikijs/monaco": ">=3.7.0",
+        "@shikijs/themes": ">=3.7.0",
+        "@sigx/daisyui": ">=0.3.0",
+        "@sigx/monaco-editor": ">=0.1.0",
+        "@sigx/router": ">=0.3.0",
+        "@sigx/store": ">=0.3.0",
+        "shiki": ">=3.7.0",
+        "sigx": ">=0.4.0"
+    },
+    "peerDependenciesMeta": {
+        "@sigx/router": {
+            "optional": true
+        },
+        "@sigx/store": {
+            "optional": true
+        },
+        "@sigx/daisyui": {
+            "optional": true
+        }
+    }
+}

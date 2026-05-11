@@ -1,6 +1,6 @@
 {
     "name": "@sigx/live-code",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "Live code blocks for sigx documentation — interactive code examples with a prebundled Monaco editor",
     "type": "module",
     "main": "./dist/index.js",

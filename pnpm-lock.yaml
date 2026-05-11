@@ -55,8 +55,8 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0(monaco-editor@0.55.1)(sigx@0.4.1)(vite@8.0.11(@types/node@22.19.18)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0))
       '@sigx/vite':
-        specifier: ^0.4.1
-        version: 0.4.1(sigx@0.4.1)(vite@8.0.11(@types/node@22.19.18)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0))
+        specifier: ^0.4.2
+        version: 0.4.2(sigx@0.4.1)(vite@8.0.11(@types/node@22.19.18)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0))
       '@types/node':
         specifier: ^22.19.1
         version: 22.19.18
@@ -719,8 +719,8 @@ packages:
   '@sigx/store@0.3.2':
     resolution: {integrity: sha512-qebcB2Su+KOsXbEm6MP2L+QV+a8py0CvDJC5HIkiDm8WQsBNvJpgrxcRvbJnXUnlsZ7zT073sgXrsDXnpGYyow==}
 
-  '@sigx/vite@0.4.1':
-    resolution: {integrity: sha512-WB1C4TjxFsL68gVzmean//ZPVH3uI1yTnZgZQxe0TO0rsNnLW9eGQVsExL1wRQ7Ku11P1z3zRbee1ug/IeicDQ==}
+  '@sigx/vite@0.4.2':
+    resolution: {integrity: sha512-hUYxBXADw8Sq9KOD4LhZAgJh3STBifHm9+qZxnHqOtfPL52PbD/Yppldt4v0S6Xom6Ek5rygIP6WnRnwL7PdDA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       sigx: '*'
@@ -1807,7 +1807,7 @@ snapshots:
       '@sigx/reactivity': 0.3.2
       '@sigx/runtime-core': 0.3.2
 
-  '@sigx/vite@0.4.1(sigx@0.4.1)(vite@8.0.11(@types/node@22.19.18)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0))':
+  '@sigx/vite@0.4.2(sigx@0.4.1)(vite@8.0.11(@types/node@22.19.18)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0))':
     dependencies:
       sigx: 0.4.1
       vite: 8.0.11(@types/node@22.19.18)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.21.0)

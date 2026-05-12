@@ -49,7 +49,7 @@
     },
     "devDependencies": {
         "@shikijs/langs": "^3.21.0",
-        "@shikijs/monaco": "^3.7.0",
+        "@shikijs/monaco": "^4.0.2",
         "@shikijs/themes": "^3.21.0",
         "@sigx/monaco-editor": "^0.1.0",
         "@sigx/vite": "^0.4.3",

@@ -55,7 +55,7 @@
         "@sigx/vite": "^0.4.3",
         "@types/node": "^22.19.1",
         "dts-bundle-generator": "^9.5.1",
-        "shiki": "^3.7.0",
+        "shiki": "^4.0.2",
         "sigx": "^0.4.3",
         "tsx": "^4.19.0",
         "typescript": "^5.9.3",

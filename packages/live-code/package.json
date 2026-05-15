@@ -50,7 +50,7 @@
     "devDependencies": {
         "@shikijs/langs": "^3.21.0",
         "@shikijs/monaco": "^3.7.0",
-        "@shikijs/themes": "^3.21.0",
+        "@shikijs/themes": "^4.0.2",
         "@sigx/monaco-editor": "^0.1.0",
         "@sigx/vite": "^0.4.3",
         "@types/node": "^22.19.1",

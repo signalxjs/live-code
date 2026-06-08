@@ -116,9 +116,9 @@ function hydrateIsland(island: HTMLElement) {
  * Each preview is rendered out-of-band into the framework-owned island element.
  * When the host framework reuses that code-window DOM for the next route, it
  * patches the element but has no knowledge of our separately-rendered preview
- * subtree — so the old preview stays visible on the new page (an orphaned
- * `.code-window-preview-container` no longer inside a valid island). Run this on
- * navigation to remove those orphans before re-hydrating.
+ * subtree — so the old preview stays visible on the new page (orphaned
+ * `LivePreview` chrome no longer inside a valid island). Run this on navigation
+ * to remove those orphans before re-hydrating.
  */
 function cleanupOrphanedPreviews() {
     for (const island of [...activePreviews]) {
@@ -142,11 +142,17 @@ function cleanupOrphanedPreviews() {
 
     // A reused element keeps its identity but loses the island marker, so the
     // loop above can't `render(null)` it without risking the framework's new
-    // content. Just remove the stranded preview chrome it left behind.
-    const containers = document.querySelectorAll<HTMLElement>('.code-window-preview-container');
-    for (const container of containers) {
-        if (!container.closest('.live-preview-island[data-island="LivePreview"]')) {
-            (container.closest('.code-window.code-window-preview') ?? container).remove();
+    // content. Just remove the stranded preview chrome it left behind. Scope to
+    // the inline-preview wrapper class (`.code-window.code-window-live` +
+    // `.code-window-preview`) — NOT the generic `.code-window-preview-container`,
+    // which the playground modal and live-code blocks also use and which legitly
+    // live outside an island.
+    const stranded = document.querySelectorAll<HTMLElement>(
+        '.code-window.code-window-live.code-window-preview'
+    );
+    for (const chrome of stranded) {
+        if (!chrome.closest('.live-preview-island[data-island="LivePreview"]')) {
+            chrome.remove();
         }
     }
 }

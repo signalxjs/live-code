@@ -18,6 +18,9 @@ export { configurePlayground, getPlaygroundConfig, type PlaygroundConfig, type O
 
 let clickHandlerInitialized = false;
 const hydratedIslands = new WeakSet<Element>();
+// Islands we've rendered a preview into, tracked so we can tear them down when
+// SPA navigation detaches or repurposes them (a WeakSet isn't enumerable).
+const activePreviews = new Set<HTMLElement>();
 let modalCounter = 0;
 
 function decodeBase64(str: string): string {
@@ -88,6 +91,7 @@ function hydrateIsland(island: HTMLElement) {
 
         // Mark hydrated *before* clearing content to prevent double hydration.
         hydratedIslands.add(island);
+        activePreviews.add(island);
         island.innerHTML = '';
 
         render(
@@ -104,6 +108,80 @@ function hydrateIsland(island: HTMLElement) {
     } catch (err) {
         console.error('[live-code] Failed to hydrate LivePreview island:', err);
     }
+}
+
+/**
+ * Tear down previews stranded by SPA navigation.
+ *
+ * Each preview is rendered out-of-band into the framework-owned island element.
+ * When the host framework reuses that code-window DOM for the next route, it
+ * patches the element but has no knowledge of our separately-rendered preview
+ * subtree — so the old preview stays visible on the new page (an orphaned
+ * `.code-window-preview-container` no longer inside a valid island). Run this on
+ * navigation to remove those orphans before re-hydrating.
+ */
+function cleanupOrphanedPreviews() {
+    for (const island of [...activePreviews]) {
+        const stillValid =
+            island.isConnected &&
+            island.matches('.live-preview-island[data-island="LivePreview"]');
+        if (stillValid) continue;
+
+        // Fully detached from the document — safe to unmount the render root so
+        // onUnmounted hooks (console subscription, preview cleanup) fire.
+        if (!island.isConnected) {
+            try {
+                render(null as any, island);
+            } catch {
+                /* already torn down */
+            }
+        }
+        activePreviews.delete(island);
+        hydratedIslands.delete(island);
+    }
+
+    // A reused element keeps its identity but loses the island marker, so the
+    // loop above can't `render(null)` it without risking the framework's new
+    // content. Just remove the stranded preview chrome it left behind.
+    const containers = document.querySelectorAll<HTMLElement>('.code-window-preview-container');
+    for (const container of containers) {
+        if (!container.closest('.live-preview-island[data-island="LivePreview"]')) {
+            (container.closest('.code-window.code-window-preview') ?? container).remove();
+        }
+    }
+}
+
+let navigationHooksInstalled = false;
+
+/**
+ * Re-sync previews on SPA navigation. The host framework reuses code-window DOM
+ * across routes and can't tear down our out-of-band previews, so we hook history
+ * navigation (router `push`/`replace`) and back/forward to clean up and
+ * re-hydrate. Deferred past the framework's own re-render of the new route, and
+ * repeated once to absorb async/batched renders.
+ */
+function installNavigationHooks() {
+    if (navigationHooksInstalled || typeof history === 'undefined') return;
+    navigationHooksInstalled = true;
+
+    const resync = () => {
+        cleanupOrphanedPreviews();
+        hydrateLivePreviewIslands();
+    };
+    const onNavigate = () => {
+        setTimeout(resync, 0);
+        setTimeout(resync, 80);
+    };
+
+    for (const method of ['pushState', 'replaceState'] as const) {
+        const original = history[method];
+        history[method] = function patched(this: History, ...args: unknown[]) {
+            const result = (original as (...a: unknown[]) => unknown).apply(this, args);
+            onNavigate();
+            return result;
+        } as History[typeof method];
+    }
+    window.addEventListener('popstate', onNavigate);
 }
 
 /**
@@ -167,6 +245,9 @@ if (typeof document !== 'undefined') {
     } else {
         initLiveCodeBlocks();
     }
+
+    // Clean up out-of-band previews the host framework strands on SPA navigation.
+    installNavigationHooks();
 
     // MutationObserver picks up islands added by SPA navigation / async content.
     const domObserver = new MutationObserver((mutations) => {

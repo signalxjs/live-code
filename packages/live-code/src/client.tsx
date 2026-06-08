@@ -18,6 +18,19 @@ export { configurePlayground, getPlaygroundConfig, type PlaygroundConfig, type O
 
 let clickHandlerInitialized = false;
 const hydratedIslands = new WeakSet<Element>();
+
+/** A hydrated preview: the element we rendered into and the props it reflects. */
+interface ActivePreview {
+    /** The element we `render()`ed the LivePreview into (a child of the island). */
+    mount: HTMLElement;
+    /** The island's `data-island-props` at hydration time, to detect reuse. */
+    sig: string;
+}
+
+// Previews we've rendered, keyed by island element, tracked so we can tear them
+// down when SPA navigation detaches, repurposes, or reuses the island (a WeakSet
+// isn't enumerable, and we need the mount + signature to clean up correctly).
+const activePreviews = new Map<HTMLElement, ActivePreview>();
 let modalCounter = 0;
 
 function decodeBase64(str: string): string {
@@ -77,19 +90,28 @@ function hydrateLivePreviewIslands() {
 function hydrateIsland(island: HTMLElement) {
     if (hydratedIslands.has(island)) return;
 
+    const propsJson = island.getAttribute('data-island-props');
+    if (!propsJson) {
+        console.error('[live-code] No props found for LivePreview island');
+        return;
+    }
+
+    // Render into a dedicated mount element we own (a child of the island).
+    // The host framework reconciles the island itself across SPA navigation, so
+    // owning the mount lets us always `render(null, mount)` — firing
+    // LivePreview's onUnmounted cleanup (console subscription, preview teardown)
+    // — even after the framework has repurposed the island element.
+    const mount = document.createElement('div');
+    mount.className = 'lc-preview-mount';
+
+    // Mark hydrated *before* clearing content to prevent double hydration.
+    hydratedIslands.add(island);
+    activePreviews.set(island, { mount, sig: propsJson });
+    island.innerHTML = '';
+    island.appendChild(mount);
+
     try {
-        const propsJson = island.getAttribute('data-island-props');
-        if (!propsJson) {
-            console.error('[live-code] No props found for LivePreview island');
-            return;
-        }
-
         const props = JSON.parse(propsJson);
-
-        // Mark hydrated *before* clearing content to prevent double hydration.
-        hydratedIslands.add(island);
-        island.innerHTML = '';
-
         render(
             <LivePreview
                 code={props.code}
@@ -99,11 +121,96 @@ function hydrateIsland(island: HTMLElement) {
                 tabs={props.tabs}
                 live={props.live}
             />,
-            island
+            mount
         );
     } catch (err) {
+        // Roll back tracking so a later resync can retry this island.
+        try {
+            render(null as unknown as never, mount);
+        } catch {
+            /* nothing mounted yet */
+        }
+        mount.remove();
+        activePreviews.delete(island);
+        hydratedIslands.delete(island);
         console.error('[live-code] Failed to hydrate LivePreview island:', err);
     }
+}
+
+/**
+ * Tear down previews stranded by SPA navigation.
+ *
+ * Each preview is rendered out-of-band into a mount we own inside the
+ * framework-owned island element. When the host framework navigates, it reuses
+ * island DOM for the next route but has no knowledge of our mount — so a preview
+ * can be left detached, stranded inside a repurposed element, or showing the
+ * previous page's content in an island reused for different code. For each we
+ * unmount the render root (firing onUnmounted) and remove the mount; valid
+ * islands whose props changed are also dropped from tracking so the subsequent
+ * `hydrateLivePreviewIslands()` re-hydrates them with the new content.
+ */
+function cleanupOrphanedPreviews() {
+    for (const [island, { mount, sig }] of activePreviews) {
+        const stillValid =
+            island.isConnected &&
+            island.matches('.live-preview-island[data-island="LivePreview"]') &&
+            island.getAttribute('data-island-props') === sig;
+        if (stillValid) continue;
+
+        // Detached, repurposed, or reused for different content. Unmounting our
+        // own mount is always safe (it's a separate render root), so onUnmounted
+        // hooks fire without touching whatever the framework now owns.
+        try {
+            render(null as unknown as never, mount);
+        } catch {
+            /* already torn down */
+        }
+        mount.remove();
+        activePreviews.delete(island);
+        hydratedIslands.delete(island);
+    }
+}
+
+const NAVIGATE_EVENT = 'sigx:live-code-navigate';
+
+/**
+ * Re-sync previews on SPA navigation. The host framework reuses code-window DOM
+ * across routes and can't tear down our out-of-band previews, so we listen for a
+ * navigation signal to clean up and re-hydrate — deferred past the framework's
+ * own re-render of the new route, and repeated once to absorb async/batched
+ * renders.
+ *
+ * The history patch that emits the signal is installed once per page (guarded by
+ * a marker on `window`), so HMR, multiple bundles, or several `@sigx/live-code`
+ * instances don't re-wrap `history` or stack `popstate` listeners — each
+ * instance just listens for the shared event and re-syncs its own previews.
+ */
+function installNavigationHooks() {
+    if (typeof window === 'undefined' || typeof history === 'undefined') return;
+
+    const resync = () => {
+        cleanupOrphanedPreviews();
+        hydrateLivePreviewIslands();
+    };
+    window.addEventListener(NAVIGATE_EVENT, () => {
+        setTimeout(resync, 0);
+        setTimeout(resync, 80);
+    });
+
+    const marker = '__sigxLiveCodeHistoryPatched__';
+    if ((window as unknown as Record<string, unknown>)[marker]) return;
+    (window as unknown as Record<string, unknown>)[marker] = true;
+
+    const emit = () => window.dispatchEvent(new Event(NAVIGATE_EVENT));
+    for (const method of ['pushState', 'replaceState'] as const) {
+        const original = history[method];
+        history[method] = function patched(this: History, ...args: unknown[]) {
+            const result = (original as (...a: unknown[]) => unknown).apply(this, args);
+            emit();
+            return result;
+        } as History[typeof method];
+    }
+    window.addEventListener('popstate', emit);
 }
 
 /**
@@ -167,6 +274,9 @@ if (typeof document !== 'undefined') {
     } else {
         initLiveCodeBlocks();
     }
+
+    // Clean up out-of-band previews the host framework strands on SPA navigation.
+    installNavigationHooks();
 
     // MutationObserver picks up islands added by SPA navigation / async content.
     const domObserver = new MutationObserver((mutations) => {

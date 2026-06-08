@@ -24,9 +24,10 @@
  */
 
 import { component, signal, onMounted, onUnmounted, type Define } from 'sigx';
-import { runCode, clearPreview, getConsoleLogs, type ExecutionResult, type ConsoleEntry } from '../execution';
+import { runCode, clearPreview, getConsoleLogs, onConsole, type ExecutionResult, type ConsoleEntry } from '../execution';
 import { initAllRuntimes, isRuntimeInitialized } from '../runtime';
 import { injectStyles } from '../utils/modal-styles';
+import { getPlaygroundConfig, DEFAULT_TRIGGER_LABEL } from '../playground-config';
 
 // Counter for generating unique container IDs
 let instanceCounter = 0;
@@ -42,6 +43,7 @@ export type LivePreviewProps =
     & Define.Prop<'filename', string, false> // Optional filename
     & Define.Prop<'tabs', TabType[], false>  // Tabs to show, in order (default: ['preview', 'code'])
     & Define.Prop<'live', boolean, false>    // Show "Try Live" button
+    & Define.Prop<'triggerLabel', string, false> // Override the "Try Live" button label
     & Define.Event<'edit', string>;          // Emitted when Edit is clicked
 
 /**
@@ -90,9 +92,9 @@ export const LivePreview = component<LivePreviewProps>(({ props, emit }) => {
     const activeTab = signal<TabType>(initialTab);
     const consoleLogs = signal<ConsoleEntry[]>([]);
     
-    // Poll interval for console updates
-    let consolePollingInterval: ReturnType<typeof setInterval> | null = null;
-    
+    // Unsubscribe from the live console stream (set on mount)
+    let offConsole: (() => void) | null = null;
+
     // Decode the source code from base64
     const getSourceCode = () => {
         try {
@@ -123,27 +125,24 @@ export const LivePreview = component<LivePreviewProps>(({ props, emit }) => {
             await initAllRuntimes();
         }
         
+        // Subscribe to live console updates (fires immediately, then on every
+        // captured log — including from effects, click handlers, and async code).
+        offConsole = onConsole(containerId, (logs) => {
+            consoleLogs.$set(logs.slice()); // Copy to trigger reactivity
+        });
+
         // Auto-execute to show preview
         await executePreview();
-        
-        // Start polling for console updates (effects may log after initial execution)
-        // Poll every 100ms to catch logs from effects, click handlers, etc.
-        consolePollingInterval = setInterval(() => {
-            const currentLogs = getConsoleLogs(containerId);
-            if (currentLogs.length !== consoleLogs.length) {
-                consoleLogs.$set(currentLogs.slice()); // Copy to trigger reactivity
-            }
-        }, 100);
     });
-    
+
     // Cleanup on unmount
     onUnmounted(() => {
-        // Stop console polling
-        if (consolePollingInterval) {
-            clearInterval(consolePollingInterval);
-            consolePollingInterval = null;
+        // Stop the console subscription
+        if (offConsole) {
+            offConsole();
+            offConsole = null;
         }
-        
+
         const container = document.getElementById(containerId);
         clearPreview(container);
     });
@@ -197,10 +196,23 @@ export const LivePreview = component<LivePreviewProps>(({ props, emit }) => {
     /** Open the full editor modal */
     function handleEdit() {
         const sourceCode = getSourceCode();
-        
+
+        emit('edit', sourceCode);
+
+        // Let consumers own the playground UI if they've configured a handler.
+        const { openPlayground } = getPlaygroundConfig();
+        if (openPlayground) {
+            openPlayground({
+                code: sourceCode,
+                language: props.language ?? 'tsx',
+                filename: props.filename ?? ''
+            });
+            return;
+        }
+
         // Inject modal styles first
         injectStyles();
-        
+
         // Import and open the modal dynamically
         import('./LiveCodeModal').then(({ LiveCodeModal }) => {
             import('sigx').then(({ render }) => {
@@ -229,8 +241,6 @@ export const LivePreview = component<LivePreviewProps>(({ props, emit }) => {
                 );
             });
         });
-        
-        emit('edit', sourceCode);
     }
     
     /** Switch to a tab */
@@ -278,12 +288,12 @@ export const LivePreview = component<LivePreviewProps>(({ props, emit }) => {
                     
                     {/* Try Live button - only shown when live prop is true */}
                     {showLiveButton && (
-                        <button 
+                        <button
                             class="code-window-try-live"
                             onClick={handleEdit}
                             title="Open in Live Playground"
                         >
-                            ⚡ Try Live
+                            {props.triggerLabel ?? getPlaygroundConfig().triggerLabel ?? DEFAULT_TRIGGER_LABEL}
                         </button>
                     )}
                 </div>

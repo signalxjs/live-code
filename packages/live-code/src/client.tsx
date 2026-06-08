@@ -11,8 +11,10 @@ import { LiveCodeModal } from './components/LiveCodeModal';
 import { LivePreview } from './components/LivePreview';
 import { initAllRuntimes, isRuntimeInitialized } from './runtime';
 import { injectStyles } from './utils/modal-styles';
+import { configurePlayground, getPlaygroundConfig, type PlaygroundConfig } from './playground-config';
 
 export { injectStyles } from './utils/modal-styles';
+export { configurePlayground, getPlaygroundConfig, type PlaygroundConfig, type OpenPlaygroundContext } from './playground-config';
 
 let clickHandlerInitialized = false;
 const hydratedIslands = new WeakSet<Element>();
@@ -104,8 +106,15 @@ function hydrateIsland(island: HTMLElement) {
     }
 }
 
-/** Initialize live code block handlers. Safe to call multiple times (HMR-friendly). */
-export function initLiveCodeBlocks() {
+/**
+ * Initialize live code block handlers. Safe to call multiple times (HMR-friendly).
+ *
+ * @param options - Optional playground overrides (trigger label, custom open handler),
+ *                   forwarded to {@link configurePlayground}.
+ */
+export function initLiveCodeBlocks(options?: PlaygroundConfig) {
+    if (options) configurePlayground(options);
+
     if (!clickHandlerInitialized) {
         clickHandlerInitialized = true;
 
@@ -130,7 +139,15 @@ export function initLiveCodeBlocks() {
                 return;
             }
 
-            openPlaygroundModal(decodeBase64(codeBase64), lang, filename);
+            const code = decodeBase64(codeBase64);
+
+            // Let consumers own the playground UI if they've configured a handler.
+            const { openPlayground } = getPlaygroundConfig();
+            if (openPlayground) {
+                openPlayground({ code, language: lang, filename });
+            } else {
+                openPlaygroundModal(code, lang, filename);
+            }
         });
     }
 
@@ -146,7 +163,7 @@ export function initLiveCodeBlocks() {
 
 if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initLiveCodeBlocks);
+        document.addEventListener('DOMContentLoaded', () => initLiveCodeBlocks());
     } else {
         initLiveCodeBlocks();
     }

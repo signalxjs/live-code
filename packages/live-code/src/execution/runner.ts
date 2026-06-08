@@ -14,6 +14,12 @@ export interface ConsoleEntry {
     args: string[];
 }
 
+/** Callback invoked with the current logs whenever a container's console changes */
+export type ConsoleListener = (logs: ConsoleEntry[]) => void;
+
+/** Returned by {@link onConsole} — call to stop receiving updates */
+export type ConsoleUnsubscribe = () => void;
+
 /** Global console output storage - scoped per containerId */
 declare global {
     interface Window {
@@ -26,8 +32,41 @@ declare global {
                 warn: typeof console.warn;
                 error: typeof console.error;
             } | null;
+            // Per-container subscribers notified live as logs are captured
+            subscribers?: Record<string, Set<ConsoleListener>>;
         };
     }
+}
+
+/**
+ * Lazily create the global console store so the subscription API works even
+ * when called before the first `runCode`. The injected runtime initializes the
+ * same global with `window.__LIVE_CODE_CONSOLE__ || {…}`, so whichever side runs
+ * first wins and the other reuses it — both seed `subscribers`.
+ */
+function ensureConsoleStore(): NonNullable<Window['__LIVE_CODE_CONSOLE__']> {
+    const store = window.__LIVE_CODE_CONSOLE__ ??= {
+        logs: {},
+        currentContainerId: null,
+        originalConsole: null,
+        subscribers: {}
+    };
+    store.subscribers ??= {};
+    return store;
+}
+
+/** Notify all subscribers for a container with its current logs */
+function notifyConsole(store: NonNullable<Window['__LIVE_CODE_CONSOLE__']>, containerId: string): void {
+    const subs = store.subscribers?.[containerId];
+    if (!subs) return;
+    const logs = store.logs[containerId] ?? [];
+    subs.forEach(cb => {
+        try {
+            cb(logs);
+        } catch {
+            // A misbehaving listener must not break the others
+        }
+    });
 }
 
 /** Execute prepared code in a sandboxed context */
@@ -44,14 +83,45 @@ export async function executeCode(preparedCode: string): Promise<void> {
 
 /** Clear console logs for a specific container */
 export function clearConsole(containerId?: string): void {
-    if (window.__LIVE_CODE_CONSOLE__) {
-        if (containerId) {
-            window.__LIVE_CODE_CONSOLE__.logs[containerId] = [];
-        } else {
-            // Clear all logs (legacy behavior)
-            window.__LIVE_CODE_CONSOLE__.logs = {};
+    const store = window.__LIVE_CODE_CONSOLE__;
+    if (!store) return;
+    if (containerId) {
+        store.logs[containerId] = [];
+        notifyConsole(store, containerId);
+    } else {
+        // Clear all logs (legacy behavior) — notify every known subscriber
+        store.logs = {};
+        if (store.subscribers) {
+            for (const id of Object.keys(store.subscribers)) {
+                notifyConsole(store, id);
+            }
         }
     }
+}
+
+/**
+ * Subscribe to a container's console output. The callback fires immediately
+ * with the current logs, then again every time a new entry is captured (including
+ * from effects and async code) and whenever the console is cleared.
+ *
+ * @param containerId - The container whose console to observe
+ * @param cb - Receives the container's full log array on every change
+ * @returns An unsubscribe function
+ *
+ * @example
+ * const off = onConsole(containerId, (logs) => render(logs));
+ * // later
+ * off();
+ */
+export function onConsole(containerId: string, cb: ConsoleListener): ConsoleUnsubscribe {
+    const store = ensureConsoleStore();
+    const subs = (store.subscribers![containerId] ??= new Set());
+    subs.add(cb);
+    // Fire immediately with the current state for late subscribers
+    cb(store.logs[containerId] ?? []);
+    return () => {
+        subs.delete(cb);
+    };
 }
 
 /** Get console logs for a specific container */

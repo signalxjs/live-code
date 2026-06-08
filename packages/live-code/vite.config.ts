@@ -6,7 +6,9 @@ import { defineLibConfig } from '@sigx/vite/lib';
 export default defineLibConfig({
     entry: {
         index: 'src/index.ts',
-        client: 'src/client.tsx'
+        client: 'src/client.tsx',
+        // Headless execution + console primitives, exposed via the `./execution` subpath
+        'execution/index': 'src/execution/index.ts'
     },
     external: [
         '@sigx/monaco-editor',

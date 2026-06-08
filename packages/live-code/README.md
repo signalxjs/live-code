@@ -112,6 +112,67 @@ const editor = await createEditor(container, {
 });
 ```
 
+### Headless — bring your own window
+
+The execution + console behavior is fully usable without the bundled UI, so you can
+own the playground design while reusing transpilation, sandboxed execution, module
+injection, and console capture. `LiveCodeModal` is the styled reference built on
+exactly these primitives.
+
+```ts
+import {
+    createEditor,
+    runCode,
+    onConsole,
+    clearPreview,
+    type ConsoleEntry
+} from '@sigx/live-code';
+
+const containerId = 'my-preview';      // a DOM element id where output mounts
+
+// 1. Editor (optional — runCode takes any source string)
+const editor = await createEditor(editorEl, { value: source, language: 'tsx' });
+
+// 2. Stream console output live. The callback fires immediately with the current
+//    logs, then on every captured entry (including from effects/async) and on clear.
+const off = onConsole(containerId, (logs: ConsoleEntry[]) => renderConsole(logs));
+
+// 3. Run. runCode clears the previous render + console for this container first.
+async function run() {
+    const result = await runCode(editor.getValue(), containerId);
+    if (!result.success) showError(result.error);
+}
+
+// 4. Teardown
+off();
+clearPreview(document.getElementById(containerId));
+```
+
+For one-shot flows you can read logs synchronously with `getConsoleLogs(containerId)`
+instead of subscribing, and `clearConsole(containerId)` to reset. The console API is
+also available from the dedicated subpath:
+
+```ts
+import { onConsole, getConsoleLogs, clearConsole } from '@sigx/live-code/execution';
+```
+
+### Custom "Try Live" action
+
+To route the built-in "Try Live" buttons (SSG blocks and `LivePreview` islands) to
+your own playground UI — and relabel them — without patching the DOM:
+
+```ts
+import { configurePlayground } from '@sigx/live-code';
+
+configurePlayground({
+    triggerLabel: 'Run',
+    openPlayground: ({ code, language, filename }) => myPlayground.open(code, language)
+});
+```
+
+`initLiveCodeBlocks(options)` accepts the same config for convenience:
+`initLiveCodeBlocks({ triggerLabel: 'Run', openPlayground })`.
+
 ## Key Exports
 
 **Components**
@@ -124,13 +185,17 @@ const editor = await createEditor(container, {
 - `loadMonaco` / `createEditor` — Lazy-loaded Monaco editor integration with sigx ambient types
 - `configureMonacoLoader` — Custom Monaco loader configuration
 
-**Execution**
+**Execution** (also available from the `@sigx/live-code/execution` subpath)
 - `runCode` / `executeCode` — Transpile and execute TSX in the browser
 - `transpileTsx` / `transformImports` — Code transformation utilities
+- `onConsole` — Subscribe to a container's console output (live callback + unsubscribe)
+- `getConsoleLogs` / `clearConsole` / `ConsoleEntry` — Read/reset captured console output
+- `clearPreview` / `formatError` — Preview + error helpers
 
 **Runtime**
 - `initRuntime` / `initAllRuntimes` — Initialize available module runtimes
 - `configureLiveCode` — Register additional modules for the playground
+- `configurePlayground` — Override the "Try Live" label + open-playground action
 
 ## Documentation
 

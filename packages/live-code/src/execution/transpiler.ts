@@ -254,11 +254,20 @@ window.__LIVE_CODE_CLEANUP__ = function() {
 };
 
 // Console capture - scoped per containerId for multiple instances on same page
-const __consoleStore__ = window.__LIVE_CODE_CONSOLE__ = window.__LIVE_CODE_CONSOLE__ || { 
+const __consoleStore__ = window.__LIVE_CODE_CONSOLE__ = window.__LIVE_CODE_CONSOLE__ || {
     logs: {},  // Keyed by containerId
     currentContainerId: null,
-    originalConsole: null 
+    originalConsole: null,
+    subscribers: {}  // Keyed by containerId — see onConsole()
 };
+// Ensure subscribers exists even if the store was created by an older build
+__consoleStore__.subscribers = __consoleStore__.subscribers || {};
+
+// Notify any onConsole() subscribers for a container with its current logs
+function __notifyConsole__(cid) {
+    const subs = __consoleStore__.subscribers && __consoleStore__.subscribers[cid];
+    if (subs) subs.forEach(cb => { try { cb(__consoleStore__.logs[cid]); } catch (e) {} });
+}
 
 // Initialize logs array for this container
 __consoleStore__.logs['${containerId}'] = [];
@@ -315,6 +324,7 @@ if (!__consoleStore__.originalConsole) {
         const cid = __consoleStore__.currentContainerId;
         if (cid && __consoleStore__.logs[cid]) {
             __consoleStore__.logs[cid].push({ type: 'log', args: args.map(a => __formatValue__(a)) });
+            __notifyConsole__(cid);
         }
     };
     window.console.info = (...args) => {
@@ -322,6 +332,7 @@ if (!__consoleStore__.originalConsole) {
         const cid = __consoleStore__.currentContainerId;
         if (cid && __consoleStore__.logs[cid]) {
             __consoleStore__.logs[cid].push({ type: 'info', args: args.map(a => __formatValue__(a)) });
+            __notifyConsole__(cid);
         }
     };
     window.console.warn = (...args) => {
@@ -329,6 +340,7 @@ if (!__consoleStore__.originalConsole) {
         const cid = __consoleStore__.currentContainerId;
         if (cid && __consoleStore__.logs[cid]) {
             __consoleStore__.logs[cid].push({ type: 'warn', args: args.map(a => __formatValue__(a)) });
+            __notifyConsole__(cid);
         }
     };
     window.console.error = (...args) => {
@@ -336,6 +348,7 @@ if (!__consoleStore__.originalConsole) {
         const cid = __consoleStore__.currentContainerId;
         if (cid && __consoleStore__.logs[cid]) {
             __consoleStore__.logs[cid].push({ type: 'error', args: args.map(a => __formatValue__(a)) });
+            __notifyConsole__(cid);
         }
     };
 }
@@ -346,18 +359,22 @@ const __scopedConsole__ = {
     log: (...args) => {
         __consoleStore__.originalConsole.log(...args);
         __consoleStore__.logs['${containerId}'].push({ type: 'log', args: args.map(a => __formatValue__(a)) });
+        __notifyConsole__('${containerId}');
     },
     info: (...args) => {
         __consoleStore__.originalConsole.info(...args);
         __consoleStore__.logs['${containerId}'].push({ type: 'info', args: args.map(a => __formatValue__(a)) });
+        __notifyConsole__('${containerId}');
     },
     warn: (...args) => {
         __consoleStore__.originalConsole.warn(...args);
         __consoleStore__.logs['${containerId}'].push({ type: 'warn', args: args.map(a => __formatValue__(a)) });
+        __notifyConsole__('${containerId}');
     },
     error: (...args) => {
         __consoleStore__.originalConsole.error(...args);
         __consoleStore__.logs['${containerId}'].push({ type: 'error', args: args.map(a => __formatValue__(a)) });
+        __notifyConsole__('${containerId}');
     }
 };
 

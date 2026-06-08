@@ -16,8 +16,22 @@ export {
     transformImports,
     clearPreview,
     formatError,
-    type ExecutionResult
+    getConsoleLogs,
+    clearConsole,
+    onConsole,
+    type ExecutionResult,
+    type ConsoleEntry,
+    type ConsoleListener,
+    type ConsoleUnsubscribe
 } from './execution';
+
+// Playground configuration (custom "open playground" action + trigger label)
+export {
+    configurePlayground,
+    getPlaygroundConfig,
+    type PlaygroundConfig,
+    type OpenPlaygroundContext
+} from './playground-config';
 
 // Editor utilities (lazy-loaded)
 export {

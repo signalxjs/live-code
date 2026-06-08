@@ -9,7 +9,7 @@
  */
 
 import { component, onMounted, onUnmounted, type Define } from 'sigx';
-import { runCode, clearPreview, getConsoleLogs, type ExecutionResult } from '../execution';
+import { runCode, clearPreview, getConsoleLogs, onConsole, type ExecutionResult } from '../execution';
 import { createEditor, type MonacoEditor, SIGX_DARK_THEME } from '../editor';
 import { initAllRuntimes, isRuntimeInitialized } from '../runtime';
 
@@ -52,8 +52,8 @@ export const LiveCodeModal = component<LiveCodeModalProps>(({ props, emit, signa
     // Editor reference
     let editorInstance: MonacoEditor | null = null;
     let runDebounceTimer: number | null = null;
-    let consolePollingInterval: ReturnType<typeof setInterval> | null = null;
-    
+    let offConsole: (() => void) | null = null;
+
     // Ensure runtime is initialized
     onMounted(() => {
         if (!isRuntimeInitialized()) {
@@ -61,22 +61,20 @@ export const LiveCodeModal = component<LiveCodeModalProps>(({ props, emit, signa
         }
         // Add keyboard listener
         document.addEventListener('keydown', handleKeyDown);
-        
-        // Start polling for console updates (effects may log after initial execution)
-        consolePollingInterval = setInterval(() => {
-            const currentLogs = getConsoleLogs(containerId);
-            if (currentLogs.length !== state.consoleLogs.length) {
-                state.consoleLogs = currentLogs.map(log => ({ ...log }));
-            }
-        }, 100);
+
+        // Subscribe to live console updates (fires immediately, then on every
+        // captured log — including from effects and async code).
+        offConsole = onConsole(containerId, (logs) => {
+            state.consoleLogs = logs.map(log => ({ ...log }));
+        });
     });
-    
+
     // Cleanup on unmount
     onUnmounted(() => {
-        // Stop console polling
-        if (consolePollingInterval) {
-            clearInterval(consolePollingInterval);
-            consolePollingInterval = null;
+        // Stop the console subscription
+        if (offConsole) {
+            offConsole();
+            offConsole = null;
         }
         // Cleanup live code containers (Portal targets, etc.)
         if (typeof (window as any).__LIVE_CODE_CLEANUP__ === 'function') {

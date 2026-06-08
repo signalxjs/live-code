@@ -9,6 +9,7 @@
         "packages/*"
     ],
     "scripts": {
+        "wt": "node scripts/worktree.mjs",
         "test": "vitest run --passWithNoTests",
         "test:watch": "vitest",
         "build": "pnpm --filter @sigx/live-code run build",

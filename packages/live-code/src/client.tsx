@@ -92,7 +92,16 @@ function hydrateIsland(island: HTMLElement) {
 
     const propsJson = island.getAttribute('data-island-props');
     if (!propsJson) {
-        console.error('[live-code] No props found for LivePreview island');
+        // No props yet. Under the core 0.6 SSR/hydration model an MDX page's
+        // island markup compiles to keyless vnodes, so on SPA navigation the
+        // host framework *reuses* a previous route's island element and patches
+        // its attributes in place. `data-island-props` is therefore transiently
+        // absent (or not yet rewritten to the new route's value) at the instant
+        // we scan — not a real error. Leave the island unhydrated and bail; the
+        // `data-island-props` MutationObserver below re-runs hydration the
+        // moment the framework writes the attribute, so the preview still
+        // arrives. (Emitting an error here is what surfaced as
+        // "No props found for LivePreview island" on every SPA navigation.)
         return;
     }
 
@@ -278,10 +287,30 @@ if (typeof document !== 'undefined') {
     // Clean up out-of-band previews the host framework strands on SPA navigation.
     installNavigationHooks();
 
-    // MutationObserver picks up islands added by SPA navigation / async content.
+    // MutationObserver picks up islands added by SPA navigation / async content,
+    // and — crucially under core 0.6 — islands whose `data-island-props` the host
+    // framework rewrites *in place* on an element reused across routes. The
+    // keyless reconciler reuses a prior route's island `<div>` and patches its
+    // attributes rather than replacing the node, so the only reliable signal that
+    // a reused island now carries new content is the `data-island-props`
+    // attribute mutation; childList alone misses it. So we resync on both a
+    // newly-added island and a `data-island-props` change — the latter also
+    // tearing down the now-stale out-of-band preview before re-hydrating.
+    // `pendingPropsChange` is *sticky* across observer deliveries: the resync is
+    // debounced, so an attribute change in one batch must survive a later
+    // childList-only batch that reschedules the timer. It's cleared only when
+    // the debounced callback actually runs.
+    let pendingPropsChange = false;
     const domObserver = new MutationObserver((mutations) => {
         let hasNewIslands = false;
         for (const mutation of mutations) {
+            if (mutation.type === 'attributes') {
+                const target = mutation.target;
+                if (target instanceof HTMLElement && target.classList.contains('live-preview-island')) {
+                    pendingPropsChange = true;
+                }
+                continue;
+            }
             if (mutation.type !== 'childList') continue;
             for (const node of mutation.addedNodes) {
                 if (node instanceof HTMLElement && (
@@ -292,17 +321,28 @@ if (typeof document !== 'undefined') {
                     break;
                 }
             }
-            if (hasNewIslands) break;
         }
 
-        if (hasNewIslands) {
+        if (hasNewIslands || pendingPropsChange) {
             clearTimeout((domObserver as any)._timeout);
-            (domObserver as any)._timeout = setTimeout(hydrateLivePreviewIslands, 10);
+            (domObserver as any)._timeout = setTimeout(() => {
+                // A reused island whose props changed needs its stale preview
+                // torn down first; a brand-new island just needs hydration.
+                const propsChanged = pendingPropsChange;
+                pendingPropsChange = false;
+                if (propsChanged) cleanupOrphanedPreviews();
+                hydrateLivePreviewIslands();
+            }, 10);
         }
     });
 
     const startObserving = () => {
-        domObserver.observe(document.body, { childList: true, subtree: true });
+        domObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['data-island-props']
+        });
     };
 
     if (document.body) {

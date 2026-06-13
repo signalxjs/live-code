@@ -296,14 +296,18 @@ if (typeof document !== 'undefined') {
     // attribute mutation; childList alone misses it. So we resync on both a
     // newly-added island and a `data-island-props` change — the latter also
     // tearing down the now-stale out-of-band preview before re-hydrating.
+    // `pendingPropsChange` is *sticky* across observer deliveries: the resync is
+    // debounced, so an attribute change in one batch must survive a later
+    // childList-only batch that reschedules the timer. It's cleared only when
+    // the debounced callback actually runs.
+    let pendingPropsChange = false;
     const domObserver = new MutationObserver((mutations) => {
         let hasNewIslands = false;
-        let propsChanged = false;
         for (const mutation of mutations) {
             if (mutation.type === 'attributes') {
                 const target = mutation.target;
                 if (target instanceof HTMLElement && target.classList.contains('live-preview-island')) {
-                    propsChanged = true;
+                    pendingPropsChange = true;
                 }
                 continue;
             }
@@ -317,14 +321,15 @@ if (typeof document !== 'undefined') {
                     break;
                 }
             }
-            if (hasNewIslands) break;
         }
 
-        if (hasNewIslands || propsChanged) {
+        if (hasNewIslands || pendingPropsChange) {
             clearTimeout((domObserver as any)._timeout);
             (domObserver as any)._timeout = setTimeout(() => {
                 // A reused island whose props changed needs its stale preview
                 // torn down first; a brand-new island just needs hydration.
+                const propsChanged = pendingPropsChange;
+                pendingPropsChange = false;
                 if (propsChanged) cleanupOrphanedPreviews();
                 hydrateLivePreviewIslands();
             }, 10);

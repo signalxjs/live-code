@@ -16,7 +16,7 @@
  *     island, the `data-island-props` MutationObserver must re-sync and hydrate
  *     the preview with the *new* props.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 
 const { renderSpy, livePreviewProps } = vi.hoisted(() => ({
     renderSpy: vi.fn(),
@@ -96,12 +96,20 @@ function lastRenderedCode(): unknown {
 
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
+// Import the client exactly once: re-importing per test would re-run its
+// top-level side effects (history patch, click handler, MutationObserver) and
+// leak listeners across tests. With a single import the module's own
+// MutationObserver picks up islands appended below — the same path SPA
+// navigation exercises in production.
+beforeAll(async () => {
+    (globalThis as any).IntersectionObserver = ImmediateIntersectionObserver as any;
+    await import('../client');
+});
+
 beforeEach(() => {
-    vi.resetModules();
     renderSpy.mockClear();
     livePreviewProps.length = 0;
     document.body.innerHTML = '';
-    (globalThis as any).IntersectionObserver = ImmediateIntersectionObserver as any;
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
@@ -116,8 +124,6 @@ function noPropsErrors() {
 describe('LivePreview island hydration across SPA navigation (#31)', () => {
     it('hydrates an island present on hard load', async () => {
         document.body.appendChild(makeIsland('CODE_A'));
-
-        await import('../client');
         await flush();
 
         expect(noPropsErrors()).toHaveLength(0);
@@ -129,8 +135,6 @@ describe('LivePreview island hydration across SPA navigation (#31)', () => {
         // rewritten — the exact state that logged "No props found" before the fix.
         const island = makeIsland(null);
         document.body.appendChild(island);
-
-        await import('../client');
         await flush();
 
         expect(noPropsErrors()).toHaveLength(0);
@@ -148,8 +152,6 @@ describe('LivePreview island hydration across SPA navigation (#31)', () => {
         // Page A: island hydrated with CODE_A.
         const island = makeIsland('CODE_A');
         document.body.appendChild(island);
-
-        await import('../client');
         await flush();
         expect(lastRenderedCode()).toBe('CODE_A');
 

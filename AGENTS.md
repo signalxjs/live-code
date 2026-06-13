@@ -56,6 +56,9 @@ agents the issue-first flow below is required.)
    gh pr create --base main --title "<title>" \
      --body "Closes #N. <short summary of the change>" --reviewer @copilot
    ```
+   The PR description becomes the squash commit **body** verbatim, and the PR
+   title (with ` (#<pr>)` appended) becomes its subject — see step 6. Write the
+   description as the commit body you want on `main`.
    (On an already-open PR: `gh pr edit <pr> --add-reviewer @copilot`.) The bot
    `copilot-pull-request-reviewer` posts its review within a minute or two. If your
    `gh` is too old to resolve `@copilot` (error: `'@copilot' not found`), request it
@@ -77,13 +80,22 @@ agents the issue-first flow below is required.)
    doesn't re-trigger on its own, re-request it: `gh pr edit <pr> --add-reviewer @copilot`.
    Repeat until Copilot has no remaining actionable feedback.
 
-6. **Merge it yourself.** Once Copilot's feedback is resolved AND CI is green, merge
-   (squash — repo rules block merge commits) and clean up:
+6. **Merge it yourself.** Once Copilot's feedback is resolved, CI is green, and —
+   for user-facing changes — the docs issue is filed on the docs repo and linked
+   from the PR (see "Documentation"), merge (squash — repo rules block merge
+   commits) and clean up:
    ```sh
-   gh pr checks <pr>                          # must be all green first
-   gh pr merge <pr> --squash --delete-branch
+   pr=123                                     # your PR number (digits only)
+   gh pr checks "$pr"                         # must be all green first
+   gh pr merge "$pr" --squash --delete-branch \
+     --subject "$(gh pr view "$pr" --json title -q .title) (#$pr)" \
+     --body "$(gh pr view "$pr" --json body -q .body)"
    ```
-   If you used a worktree, remove it afterward: `pnpm wt rm <name>`.
+   Pass `--subject`/`--body` explicitly, exactly as above — GitHub appends
+   `Co-authored-by:` trailers to every message it generates itself (in **all**
+   squash-message modes, even PR_TITLE/PR_BODY) whenever a branch-commit author
+   differs from the merging account; an explicit message is used verbatim, so
+   no trailers. If you used a worktree, remove it afterward: `pnpm wt rm <name>`.
 
 ## Build, Test, Lint
 
@@ -125,8 +137,9 @@ digits, `.`, `_`, `-` only.
 
 ## Documentation
 
-Docs are part of the change, not a follow-up — a change isn't done until the docs
-that describe it are updated. Two surfaces, two rules:
+Docs are part of the change, not a follow-up — in-repo docs ship in the same
+PR, and the docs-site update is queued (as a docs-repo issue) before merge. Two
+surfaces, two rules:
 
 **In-repo docs — update in *this* PR when you touch the matching thing:**
 
@@ -138,11 +151,32 @@ that describe it are updated. Two surfaces, two rules:
 | change the workflow / process itself | `AGENTS.md` here — and, since it is the shared standard, upstream the same change to [`signalxjs/repo-template`](https://github.com/signalxjs/repo-template) |
 
 **The docs *site* is separate — don't edit it from here.** User-facing changes
-(new or changed public API, features, packages) also need a change to the docs
-site [`signalxjs/signalxjs.github.io`](https://github.com/signalxjs/signalxjs.github.io).
-That is a **separate PR in the docs repo**, opened per *its* `AGENTS.md` (which
-knows how the site pulls from each source repo) — **link it from this PR**. A
-user-facing change isn't shipped until its docs-site PR exists.
+(new or changed public API, features, packages) must end up documented on the
+docs site [`signalxjs/signalxjs.github.io`](https://github.com/signalxjs/signalxjs.github.io),
+but that work belongs to the **docs agent**, which works through the docs repo's
+issue queue. Don't open docs-site PRs from source repos — your job is to feed
+the queue, in two moments:
+
+- **Before merging a PR with user-facing changes, file an issue on the docs
+  repo** describing what changed and what the docs need to cover, and link it
+  from the PR:
+  ```sh
+  gh issue create --repo signalxjs/signalxjs.github.io \
+    --title "live-code: <what changed>" \
+    --body "Source: signalxjs/live-code#<pr>. <What needs documenting, and where on the site.> Not yet released."
+  ```
+  A user-facing PR isn't mergeable until its docs issue exists (see step 6 of
+  the workflow).
+- **When you cut a release** (push a `vX.Y.Z` tag), comment the release tag on
+  every open docs issue covering a change shipped in that release:
+  ```sh
+  gh issue comment <n> --repo signalxjs/signalxjs.github.io \
+    --body "Released in live-code vX.Y.Z."
+  ```
+  (Mention the published package version(s) too if they differ from the tag.)
+  A docs issue without a release comment means *merged but not released — don't
+  document yet*; the release comment is the docs agent's signal that the change
+  is live and ready to document.
 
 ## Conventions & working principles
 

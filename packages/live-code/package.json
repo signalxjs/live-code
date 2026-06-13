@@ -49,7 +49,7 @@
         "url": "git+https://github.com/signalxjs/live-code.git",
         "directory": "packages/live-code"
     },
-    "homepage": "https://github.com/signalxjs/live-code",
+    "homepage": "https://sigx.dev/",
     "bugs": {
         "url": "https://github.com/signalxjs/live-code/issues"
     },

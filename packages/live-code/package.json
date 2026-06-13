@@ -27,7 +27,9 @@
         "src",
         "!src/**/__tests__/**",
         "!src/**/*.test.ts",
-        "!src/**/*.test.tsx"
+        "!src/**/*.test.tsx",
+        "!src/**/*.spec.ts",
+        "!src/**/*.spec.tsx"
     ],
     "scripts": {
         "build": "tsx scripts/generate-types.ts && vite build && tsgo --emitDeclarationOnly",

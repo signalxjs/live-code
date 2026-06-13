@@ -24,7 +24,10 @@
     },
     "files": [
         "dist",
-        "src"
+        "src",
+        "!src/**/__tests__/**",
+        "!src/**/*.test.ts",
+        "!src/**/*.test.tsx"
     ],
     "scripts": {
         "build": "tsx scripts/generate-types.ts && vite build && tsgo --emitDeclarationOnly",

@@ -235,11 +235,13 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
         await flush();
         expect(runCodeSpy.mock.calls.at(-1)?.[0]).toBe('CODE_A');
 
-        // SPA nav: the reconciler reuses the element and rewrites its code attr.
+        // SPA nav: the reconciler reuses the element and rewrites its code attr;
+        // a navigation signal drives the re-sync (reliable, unlike racing the
+        // attribute MutationObserver under happy-dom / Node 20).
         block.setAttribute('data-live-code', btoa('CODE_B'));
-        await flush();
+        window.dispatchEvent(new Event('sigx:live-code-navigate'));
 
-        expect(runCodeSpy.mock.calls.at(-1)?.[0]).toBe('CODE_B');
+        await vi.waitFor(() => expect(runCodeSpy.mock.calls.at(-1)?.[0]).toBe('CODE_B'));
     });
 
     it('re-runs a reused block whose preview container is swapped (same code)', async () => {
@@ -299,8 +301,12 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
         document.body.appendChild(block);
         await flush(); // run 1 started; runCode(CODE_A) is pending
 
+        // Rewrite the code + drive the re-sync via the SPA-nav hook (reliable),
+        // then wait until run 2 (CODE_B) has actually started — so run 1 is
+        // genuinely superseded before it resolves below.
         block.setAttribute('data-live-code', btoa('CODE_B'));
-        await flush(); // run 2 ran CODE_B to completion
+        window.dispatchEvent(new Event('sigx:live-code-navigate'));
+        await vi.waitFor(() => expect(runCodeSpy.mock.calls.at(-1)?.[0]).toBe('CODE_B'));
 
         const callsBefore = runCodeSpy.mock.calls.length;
         resolveFirst({ success: false, error: 'STALE_ERROR' }); // run 1 resolves late

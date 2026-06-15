@@ -11,9 +11,10 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 
-const { runCodeSpy, openPlaygroundSpy } = vi.hoisted(() => ({
+const { runCodeSpy, openPlaygroundSpy, offConsoleSpy } = vi.hoisted(() => ({
     runCodeSpy: vi.fn(),
     openPlaygroundSpy: vi.fn(),
+    offConsoleSpy: vi.fn(),
 }));
 
 vi.mock('sigx', async (importOriginal) => {
@@ -25,7 +26,7 @@ vi.mock('../execution', () => ({
     runCode: (...args: unknown[]) => runCodeSpy(...args),
     clearPreview: vi.fn(),
     getConsoleLogs: () => [],
-    onConsole: () => () => {},
+    onConsole: () => offConsoleSpy,
 }));
 vi.mock('../runtime', () => ({
     initAllRuntimes: vi.fn().mockResolvedValue(undefined),
@@ -106,6 +107,7 @@ beforeEach(() => {
     runCodeSpy.mockReset();
     runCodeSpy.mockResolvedValue({ success: true });
     openPlaygroundSpy.mockReset();
+    offConsoleSpy.mockReset();
     document.body.innerHTML = '';
 });
 
@@ -158,6 +160,22 @@ describe('progressive enhancement — delegated interactions', () => {
 
         expect(openPlaygroundSpy).toHaveBeenCalledTimes(1);
         expect(openPlaygroundSpy.mock.calls[0][0]).toMatchObject({ code: 'EDIT_ME', language: 'tsx' });
+    });
+});
+
+describe('progressive enhancement — teardown', () => {
+    it('tears down a removed block so its console subscription does not leak', async () => {
+        const block = makeBlock('GOODBYE');
+        document.body.appendChild(block);
+        await flush();
+        expect(runCodeSpy).toHaveBeenCalled();
+
+        offConsoleSpy.mockClear();
+        block.remove();
+        await flush();
+
+        // The removed block's preview run was torn down (unsubscribed).
+        expect(offConsoleSpy).toHaveBeenCalled();
     });
 });
 

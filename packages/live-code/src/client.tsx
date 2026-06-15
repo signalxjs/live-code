@@ -297,6 +297,10 @@ export function initLiveCodeBlocks(options?: PlaygroundConfig) {
             if (tabBtn) {
                 const block = tabBtn.closest<HTMLElement>('[data-live-preview]');
                 if (block) {
+                    // Purely client-side show/hide — never let a tab button (even
+                    // a stray `type="submit"`) submit a surrounding form.
+                    e.preventDefault();
+                    e.stopPropagation();
                     switchTab(block, tabBtn.getAttribute('data-tab') ?? 'preview');
                     return;
                 }
@@ -351,37 +355,44 @@ if (typeof document !== 'undefined') {
     // Re-run previews the host framework strands or repurposes on SPA navigation.
     installNavigationHooks();
 
-    // MutationObserver picks up preview blocks added by SPA navigation / async
-    // content, and — under core 0.6's keyless reconciler — blocks whose
+    // MutationObserver picks up preview blocks added/removed by SPA navigation /
+    // async content, and — under core 0.6's keyless reconciler — blocks whose
     // `data-live-code` the framework rewrites *in place* on an element reused
-    // across routes (childList alone misses that). We re-sync on both a
-    // newly-added block and a `data-live-code` change; `pendingCodeChange` is
-    // sticky across debounced deliveries so an attribute change in one batch
-    // survives a later childList-only batch that reschedules the timer.
+    // across routes (childList alone misses that). We re-sync on a newly-added
+    // or removed block (the latter so detached previews get torn down promptly,
+    // not leaked) and on any `data-live-code` change within a block subtree —
+    // the attribute can land on a descendant (e.g. the Try-Live button), so we
+    // match the nearest `[data-live-preview]` ancestor, not just the target.
+    // `pendingCodeChange` is sticky across debounced deliveries so an attribute
+    // change in one batch survives a later childList-only batch that reschedules
+    // the timer.
+    const isOrContainsBlock = (node: Node): boolean =>
+        node instanceof HTMLElement &&
+        (node.hasAttribute?.('data-live-preview') || !!node.querySelector?.('[data-live-preview]'));
+
     let pendingCodeChange = false;
     const domObserver = new MutationObserver((mutations) => {
-        let hasNewBlocks = false;
+        let structuralChange = false;
         for (const mutation of mutations) {
             if (mutation.type === 'attributes') {
                 const target = mutation.target;
-                if (target instanceof HTMLElement && target.hasAttribute('data-live-preview')) {
+                if (target instanceof HTMLElement &&
+                    (target.hasAttribute('data-live-preview') || target.closest('[data-live-preview]'))) {
                     pendingCodeChange = true;
                 }
                 continue;
             }
             if (mutation.type !== 'childList') continue;
             for (const node of mutation.addedNodes) {
-                if (node instanceof HTMLElement && (
-                    node.hasAttribute?.('data-live-preview') ||
-                    node.querySelector?.('[data-live-preview]')
-                )) {
-                    hasNewBlocks = true;
-                    break;
-                }
+                if (isOrContainsBlock(node)) { structuralChange = true; break; }
+            }
+            if (structuralChange) continue;
+            for (const node of mutation.removedNodes) {
+                if (isOrContainsBlock(node)) { structuralChange = true; break; }
             }
         }
 
-        if (hasNewBlocks || pendingCodeChange) {
+        if (structuralChange || pendingCodeChange) {
             clearTimeout((domObserver as any)._timeout);
             (domObserver as any)._timeout = setTimeout(() => {
                 pendingCodeChange = false;

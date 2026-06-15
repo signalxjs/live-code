@@ -177,6 +177,21 @@ describe('progressive enhancement — teardown', () => {
         // The removed block's preview run was torn down (unsubscribed).
         expect(offConsoleSpy).toHaveBeenCalled();
     });
+
+    it('re-observes and re-runs a block that is detached then re-attached', async () => {
+        const block = makeBlock('REATTACH');
+        document.body.appendChild(block);
+        await flush();
+        expect(runCodeSpy).toHaveBeenCalledTimes(1);
+
+        block.remove();
+        await flush();
+
+        document.body.appendChild(block);
+        await flush();
+        // Cleared from the observed set on detach → re-observed → re-run on reattach.
+        expect(runCodeSpy).toHaveBeenCalledTimes(2);
+    });
 });
 
 describe('progressive enhancement — SPA reuse (#31)', () => {

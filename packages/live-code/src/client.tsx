@@ -206,25 +206,30 @@ function runPreview(block: HTMLElement) {
 
 // --- Enhancement scan -----------------------------------------------------
 
-/** Attach a run-on-view IntersectionObserver to any not-yet-observed blocks. */
-function enhancePreviewBlocks() {
-    const blocks = document.querySelectorAll<HTMLElement>('[data-live-preview]');
-    const todo = Array.from(blocks).filter((block) => !observedBlocks.has(block));
-    if (todo.length === 0) return;
-
-    const observer = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-            if (entry.isIntersecting) {
-                observer.unobserve(entry.target);
-                runPreview(entry.target as HTMLElement);
+// A single module-level observer. A fresh observer kept only in a local would be
+// eligible for GC before a not-yet-visible block intersects — dropping its run —
+// since IntersectionObserver holds only weak references to its targets. Created
+// lazily so the module stays import-safe where IntersectionObserver is absent.
+let previewObserver: IntersectionObserver | null = null;
+function getPreviewObserver(): IntersectionObserver {
+    if (!previewObserver) {
+        previewObserver = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.isIntersecting) {
+                    previewObserver!.unobserve(entry.target);
+                    runPreview(entry.target as HTMLElement);
+                }
             }
-        }
-    }, {
-        rootMargin: '50px',
-        threshold: 0.01,
-    });
+        }, { rootMargin: '50px', threshold: 0.01 });
+    }
+    return previewObserver;
+}
 
-    for (const block of todo) {
+/** Attach the run-on-view observer to any not-yet-observed blocks. */
+function enhancePreviewBlocks() {
+    const observer = getPreviewObserver();
+    for (const block of document.querySelectorAll<HTMLElement>('[data-live-preview]')) {
+        if (observedBlocks.has(block)) continue;
         observedBlocks.add(block);
         observer.observe(block);
     }
@@ -242,12 +247,19 @@ function enhancePreviewBlocks() {
 function resyncPreviews() {
     for (const [block, active] of activePreviews) {
         const sig = block.getAttribute('data-live-code');
-        const stillValid = block.isConnected && block.matches('[data-live-preview]') && sig === active.sig;
-        if (stillValid) continue;
+        const reusedInPlace = block.isConnected && block.matches('[data-live-preview]') && sig === active.sig;
+        if (reusedInPlace) continue;
 
         teardownPreview(block);
         if (block.isConnected && block.matches('[data-live-preview]') && sig) {
+            // Same element, new code — re-run directly (it's on screen already and
+            // the observer fired for it once; we keep it marked observed).
             runPreview(block);
+        } else if (!block.isConnected) {
+            // Detached. Drop it from the observed set (and the observer) so it gets
+            // re-observed and can re-run if the framework re-attaches the element.
+            observedBlocks.delete(block);
+            getPreviewObserver().unobserve(block);
         }
     }
     enhancePreviewBlocks();

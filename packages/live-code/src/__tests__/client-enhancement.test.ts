@@ -11,10 +11,12 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 
-const { runCodeSpy, openPlaygroundSpy, offConsoleSpy } = vi.hoisted(() => ({
+const { runCodeSpy, openPlaygroundSpy, offConsoleSpy, consoleHolder } = vi.hoisted(() => ({
     runCodeSpy: vi.fn(),
     openPlaygroundSpy: vi.fn(),
     offConsoleSpy: vi.fn(),
+    // Captures the live-console listener so a test can push arbitrary log entries.
+    consoleHolder: { cb: null as null | ((logs: unknown[]) => void) },
 }));
 
 vi.mock('sigx', async (importOriginal) => {
@@ -27,7 +29,7 @@ vi.mock('../execution', () => ({
     clearPreview: vi.fn(),
     clearConsole: vi.fn(),
     getConsoleLogs: () => [],
-    onConsole: () => offConsoleSpy,
+    onConsole: (_id: string, cb: (logs: unknown[]) => void) => { consoleHolder.cb = cb; return offConsoleSpy; },
 }));
 vi.mock('../runtime', () => ({
     initAllRuntimes: vi.fn().mockResolvedValue(undefined),
@@ -161,6 +163,37 @@ describe('progressive enhancement — delegated interactions', () => {
 
         expect(openPlaygroundSpy).toHaveBeenCalledTimes(1);
         expect(openPlaygroundSpy.mock.calls[0][0]).toMatchObject({ code: 'EDIT_ME', language: 'tsx' });
+    });
+});
+
+describe('progressive enhancement — console rendering', () => {
+    it('clamps an attacker-controlled log type before it reaches HTML', async () => {
+        const block = makeBlock('CODE');
+        document.body.appendChild(block);
+        await flush();
+
+        // Preview code can mutate window.__LIVE_CODE_CONSOLE__ with any `type`.
+        consoleHolder.cb?.([{ type: '"><img src=x onerror=alert(1)>', args: ['hi'] }]);
+
+        const pane = block.querySelector('.code-window-console-pane')!;
+        // No HTML injection: the malicious type never becomes markup.
+        expect(pane.querySelector('img')).toBeNull();
+        expect(pane.innerHTML).not.toContain('onerror');
+        // Unknown type is clamped to the default class + icon.
+        const line = pane.querySelector('.code-window-console-line')!;
+        expect(line.className).toContain('code-window-console-log');
+        expect(pane.querySelector('.code-window-console-text')?.textContent).toBe('hi');
+    });
+
+    it('keeps a known log type on the rendered line', async () => {
+        const block = makeBlock('CODE');
+        document.body.appendChild(block);
+        await flush();
+
+        consoleHolder.cb?.([{ type: 'error', args: ['boom'] }]);
+
+        const line = block.querySelector('.code-window-console-pane .code-window-console-line')!;
+        expect(line.className).toContain('code-window-console-error');
     });
 });
 

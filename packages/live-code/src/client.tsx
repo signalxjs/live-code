@@ -111,6 +111,18 @@ function switchTab(block: HTMLElement, tab: string) {
 
 // --- Console rendering ----------------------------------------------------
 
+const CONSOLE_TYPES = new Set(['log', 'info', 'warn', 'error']);
+
+/**
+ * Clamp a console entry's `type` to the known set before it reaches HTML. The
+ * field is typed as a union, but preview code runs untrusted and can push an
+ * arbitrary `type` into `window.__LIVE_CODE_CONSOLE__`; interpolating it raw
+ * into the line's class attribute would be an HTML-injection/XSS vector.
+ */
+function consoleType(type: string): string {
+    return CONSOLE_TYPES.has(type) ? type : 'log';
+}
+
 function consoleIcon(type: string): string {
     switch (type) {
         case 'error': return '✕';
@@ -126,12 +138,13 @@ function renderConsole(block: HTMLElement, logs: ConsoleEntry[]) {
     if (pane) {
         pane.innerHTML = logs.length === 0
             ? '<div class="code-window-console-empty">No console output</div>'
-            : logs.map((log) =>
-                `<div class="code-window-console-line code-window-console-${log.type}">` +
-                    `<span class="code-window-console-icon">${consoleIcon(log.type)}</span>` +
+            : logs.map((log) => {
+                const type = consoleType(log.type);
+                return `<div class="code-window-console-line code-window-console-${type}">` +
+                    `<span class="code-window-console-icon">${consoleIcon(type)}</span>` +
                     `<span class="code-window-console-text">${escapeHtml(log.args.join(' '))}</span>` +
-                '</div>'
-            ).join('');
+                '</div>';
+            }).join('');
     }
 
     const consoleTab = block.querySelector('.code-window-tab[data-tab="console"]');

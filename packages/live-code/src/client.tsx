@@ -37,6 +37,8 @@ interface ActivePreview {
     containerId: string;
     /** `data-live-code` at run time — lets us detect a block reused for new code. */
     sig: string;
+    /** Generation of this run; a later run for the same block supersedes it. */
+    runId: number;
     offConsole: (() => void) | null;
 }
 const activePreviews = new Map<HTMLElement, ActivePreview>();
@@ -150,6 +152,20 @@ function renderConsole(block: HTMLElement, logs: ConsoleEntry[]) {
 
 // --- Preview execution ----------------------------------------------------
 
+let runSeq = 0;
+
+/**
+ * The block's source code (base64). The SSG puts `data-live-code` on the
+ * `[data-live-preview]` wrapper, but tolerate it living on a descendant (e.g. the
+ * Try-Live button) so a reused block whose attribute the framework rewrites on a
+ * child is still picked up.
+ */
+function blockCode(block: HTMLElement): string | null {
+    return block.getAttribute('data-live-code')
+        ?? block.querySelector('[data-live-code]')?.getAttribute('data-live-code')
+        ?? null;
+}
+
 /** Tear down a block's running preview (console subscription + sandbox DOM). */
 function teardownPreview(block: HTMLElement) {
     const active = activePreviews.get(block);
@@ -165,12 +181,18 @@ function teardownPreview(block: HTMLElement) {
 /** Run a `[data-live-preview]` block's code into its preview container. */
 function runPreview(block: HTMLElement) {
     const container = block.querySelector<HTMLElement>('.code-window-preview-container');
-    const codeBase64 = block.getAttribute('data-live-code');
+    const codeBase64 = blockCode(block);
     if (!container || !container.id || !codeBase64) return;
     const containerId = container.id;
 
     // A reused block (SPA nav) may already have a running preview — replace it.
     teardownPreview(block);
+
+    // Tag this run; an async continuation must bail if a newer run for the same
+    // block (e.g. a resync mid-flight) has superseded it, or a stale `runCode()`
+    // could overwrite the newer preview's UI/console when it finally resolves.
+    const runId = ++runSeq;
+    const superseded = () => activePreviews.get(block)?.runId !== runId;
 
     const pane = block.querySelector('.code-window-preview-pane');
     const loadingEl = pane?.querySelector<HTMLElement>('.code-window-preview-loading') ?? null;
@@ -185,24 +207,28 @@ function runPreview(block: HTMLElement) {
 
     // Subscribe to the live console stream (fires immediately, then per log).
     const offConsole = onConsole(containerId, (logs) => renderConsole(block, logs));
-    activePreviews.set(block, { containerId, sig: codeBase64, offConsole });
+    activePreviews.set(block, { containerId, sig: codeBase64, runId, offConsole });
 
     const code = decodeBase64(codeBase64);
     void (async () => {
         try {
             await ensureRuntimes();
+            if (superseded()) return;
             setLoading(true);
             setError(null);
             // Let the runtime injection settle before executing.
             await new Promise((resolve) => requestAnimationFrame(resolve));
+            if (superseded()) return;
             const result = await runCode(code, containerId);
+            if (superseded()) return;
             if (!result.success && result.error) setError(result.error);
             renderConsole(block, getConsoleLogs(containerId));
         } catch (err) {
+            if (superseded()) return;
             setError(err instanceof Error ? err.message : String(err));
             console.error('[live-code] Failed to run preview:', err);
         } finally {
-            setLoading(false);
+            if (!superseded()) setLoading(false);
         }
     })();
 }
@@ -262,7 +288,7 @@ function enhancePreviewBlocks() {
  */
 function resyncPreviews() {
     for (const [block, active] of activePreviews) {
-        const sig = block.getAttribute('data-live-code');
+        const sig = blockCode(block);
         const reusedInPlace = block.isConnected && block.matches('[data-live-preview]') && sig === active.sig;
         if (reusedInPlace) continue;
 

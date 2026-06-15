@@ -208,4 +208,26 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
 
         expect(runCodeSpy.mock.calls.at(-1)?.[0]).toBe('CODE_B');
     });
+
+    it('a superseded in-flight run does not clobber the newer run', async () => {
+        // First run hangs so a second run can supersede it before it resolves.
+        let resolveFirst: (v: unknown) => void = () => {};
+        runCodeSpy.mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }));
+        runCodeSpy.mockResolvedValue({ success: true });
+
+        const block = makeBlock('CODE_A');
+        document.body.appendChild(block);
+        await flush(); // run 1 started; runCode(CODE_A) is pending
+
+        block.setAttribute('data-live-code', btoa('CODE_B'));
+        await flush(); // run 2 ran CODE_B to completion
+
+        const callsBefore = runCodeSpy.mock.calls.length;
+        resolveFirst({ success: false, error: 'STALE_ERROR' }); // run 1 resolves late
+        await flush();
+
+        // Run 1's late resolution is ignored: no extra run, no stale error painted.
+        expect(runCodeSpy.mock.calls.length).toBe(callsBefore);
+        expect(block.querySelector('.code-window-error-text')?.textContent).not.toBe('STALE_ERROR');
+    });
 });

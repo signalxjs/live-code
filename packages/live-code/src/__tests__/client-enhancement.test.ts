@@ -209,6 +209,31 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
         expect(runCodeSpy.mock.calls.at(-1)?.[0]).toBe('CODE_B');
     });
 
+    it('re-runs a reused block whose preview container is swapped (same code)', async () => {
+        const block = makeBlock('SAME_CODE');
+        document.body.appendChild(block);
+        await flush();
+        expect(runCodeSpy).toHaveBeenCalledTimes(1);
+        const firstId = String(runCodeSpy.mock.calls[0][1]);
+
+        // SPA nav reuses the element and its code but replaces the preview
+        // container node with a new id, leaving data-live-code unchanged. The
+        // tracked run now points at a stale container/console subscription.
+        const container = block.querySelector<HTMLElement>('.code-window-preview-container')!;
+        const newId = `${firstId}-swapped`;
+        container.id = newId;
+        offConsoleSpy.mockClear();
+
+        // A navigation signal drives the re-sync (data-live-code didn't change).
+        history.pushState({}, '', '/next');
+        await flush();
+
+        // Stale run torn down (unsubscribed) and re-run into the new container.
+        expect(offConsoleSpy).toHaveBeenCalled();
+        expect(runCodeSpy).toHaveBeenCalledTimes(2);
+        expect(String(runCodeSpy.mock.calls[1][1])).toBe(newId);
+    });
+
     it('a superseded in-flight run does not clobber the newer run', async () => {
         // First run hangs so a second run can supersede it before it resolves.
         let resolveFirst: (v: unknown) => void = () => {};

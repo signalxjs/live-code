@@ -289,7 +289,13 @@ function enhancePreviewBlocks() {
 function resyncPreviews() {
     for (const [block, active] of activePreviews) {
         const sig = blockCode(block);
-        const reusedInPlace = block.isConnected && block.matches('[data-live-preview]') && sig === active.sig;
+        // "Reused in place" also requires the same preview container: the
+        // reconciler can swap `.code-window-preview-container` (new id / node)
+        // while leaving `data-live-code` untouched — code unchanged but the
+        // tracked `containerId`/console subscription now point at stale DOM.
+        const containerId = block.querySelector<HTMLElement>('.code-window-preview-container')?.id;
+        const reusedInPlace = block.isConnected && block.matches('[data-live-preview]')
+            && sig === active.sig && containerId === active.containerId;
         if (reusedInPlace) continue;
 
         teardownPreview(block);

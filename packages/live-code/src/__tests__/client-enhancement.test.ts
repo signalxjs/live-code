@@ -25,6 +25,7 @@ vi.mock('../components/LiveCodeModal', () => ({ LiveCodeModal: () => null }));
 vi.mock('../execution', () => ({
     runCode: (...args: unknown[]) => runCodeSpy(...args),
     clearPreview: vi.fn(),
+    clearConsole: vi.fn(),
     getConsoleLogs: () => [],
     onConsole: () => offConsoleSpy,
 }));

@@ -17,7 +17,7 @@
 
 import { render } from 'sigx';
 import { LiveCodeModal } from './components/LiveCodeModal';
-import { runCode, clearPreview, getConsoleLogs, onConsole, type ConsoleEntry } from './execution';
+import { runCode, clearPreview, clearConsole, getConsoleLogs, onConsole, type ConsoleEntry } from './execution';
 import { initAllRuntimes } from './runtime';
 import { injectStyles } from './utils/modal-styles';
 import { configurePlayground, getPlaygroundConfig, type PlaygroundConfig } from './playground-config';
@@ -156,6 +156,9 @@ function teardownPreview(block: HTMLElement) {
     if (!active) return;
     active.offConsole?.();
     clearPreview(document.getElementById(active.containerId));
+    // Free the container's console buffer too, or its log array lingers in
+    // `window.__LIVE_CODE_CONSOLE__` for every preview id seen across SPA nav.
+    clearConsole(active.containerId);
     activePreviews.delete(block);
 }
 
@@ -227,8 +230,21 @@ function getPreviewObserver(): IntersectionObserver {
 
 /** Attach the run-on-view observer to any not-yet-observed blocks. */
 function enhancePreviewBlocks() {
+    const blocks = document.querySelectorAll<HTMLElement>('[data-live-preview]');
+
+    // Where IntersectionObserver is unavailable (older engines, some test/SSR
+    // shims), don't crash all of live-code — just run every preview eagerly.
+    if (typeof IntersectionObserver === 'undefined') {
+        for (const block of blocks) {
+            if (observedBlocks.has(block)) continue;
+            observedBlocks.add(block);
+            runPreview(block);
+        }
+        return;
+    }
+
     const observer = getPreviewObserver();
-    for (const block of document.querySelectorAll<HTMLElement>('[data-live-preview]')) {
+    for (const block of blocks) {
         if (observedBlocks.has(block)) continue;
         observedBlocks.add(block);
         observer.observe(block);
@@ -256,10 +272,12 @@ function resyncPreviews() {
             // the observer fired for it once; we keep it marked observed).
             runPreview(block);
         } else if (!block.isConnected) {
-            // Detached. Drop it from the observed set (and the observer) so it gets
-            // re-observed and can re-run if the framework re-attaches the element.
+            // Detached. Drop it from the observed set (and the observer, if one
+            // exists) so it gets re-observed and can re-run if the framework
+            // re-attaches the element. Use the existing observer — don't force one
+            // into being (it may never have been created / be unavailable).
             observedBlocks.delete(block);
-            getPreviewObserver().unobserve(block);
+            previewObserver?.unobserve(block);
         }
     }
     enhancePreviewBlocks();

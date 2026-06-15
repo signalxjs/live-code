@@ -275,14 +275,16 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
         await flush();
         expect(runCodeSpy).not.toHaveBeenCalled();
 
-        // Container shows up + a rescan is triggered (attr change) → it runs now.
+        // Container shows up, then a re-sync retries the block. Trigger the
+        // re-sync via the SPA-navigation hook (a plain setTimeout path) rather
+        // than an attribute mutation — happy-dom's attribute-MutationObserver
+        // delivery is unreliable across engines (flaked on Node 20).
         const c = document.createElement('div');
         c.className = 'code-window-preview-container';
         c.id = 'sigx-preview-late';
         block.querySelector('.code-window-preview-pane')!.appendChild(c);
-        block.setAttribute('data-live-code', btoa('LATER'));
+        window.dispatchEvent(new Event('sigx:live-code-navigate'));
 
-        // Poll rather than race the debounced resync (flaky under slow CI / Node 20).
         await vi.waitFor(() => expect(runCodeSpy).toHaveBeenCalledTimes(1));
         expect(runCodeSpy.mock.calls.at(-1)?.[0]).toBe('LATER');
     });

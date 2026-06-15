@@ -169,9 +169,10 @@ let runSeq = 0;
 
 /**
  * The block's source code (base64). The SSG puts `data-live-code` on the
- * `[data-live-preview]` wrapper, but tolerate it living on a descendant (e.g. the
- * Try-Live button) so a reused block whose attribute the framework rewrites on a
- * child is still picked up.
+ * `[data-live-preview]` wrapper — that's authoritative and is what we read. As a
+ * fallback only when the wrapper carries no attribute, we read it from a
+ * descendant (e.g. the Try-Live button), so a block that somehow has it only on a
+ * child still resolves a value.
  */
 function blockCode(block: HTMLElement): string | null {
     return block.getAttribute('data-live-code')
@@ -335,11 +336,12 @@ function resyncPreviews() {
             // the observer fired for it once). If it isn't ready, un-mark so the
             // trailing enhance pass re-observes and retries it.
             if (!runPreview(block)) observedBlocks.delete(block);
-        } else if (!block.isConnected) {
-            // Detached. Drop it from the observed set (and the observer, if one
-            // exists) so it gets re-observed and can re-run if the framework
-            // re-attaches the element. Use the existing observer — don't force one
-            // into being (it may never have been created / be unavailable).
+        } else {
+            // Detached, repurposed, or temporarily without `data-live-code` during
+            // reconciliation. Drop it from the observed set (and the observer, if
+            // one exists) so a later scan re-observes and retries it once it's
+            // ready / re-attached. Don't force the observer into being — it may
+            // never have been created (or be unavailable).
             observedBlocks.delete(block);
             previewObserver?.unobserve(block);
         }

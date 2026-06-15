@@ -18,7 +18,7 @@
 import { render } from 'sigx';
 import { LiveCodeModal } from './components/LiveCodeModal';
 import { runCode, clearPreview, getConsoleLogs, onConsole, type ConsoleEntry } from './execution';
-import { initAllRuntimes, isRuntimeInitialized } from './runtime';
+import { initAllRuntimes } from './runtime';
 import { injectStyles } from './utils/modal-styles';
 import { configurePlayground, getPlaygroundConfig, type PlaygroundConfig } from './playground-config';
 
@@ -40,6 +40,19 @@ interface ActivePreview {
     offConsole: (() => void) | null;
 }
 const activePreviews = new Map<HTMLElement, ActivePreview>();
+
+/**
+ * Runtime init, shared and awaited by every preview run. `isRuntimeInitialized()`
+ * flips true the instant `window.__SIGX__` is set — at the *start* of
+ * `initAllRuntimes()`, before the optional runtimes (router / store / daisyui /
+ * registered modules) finish — so gating a run on it can execute a preview
+ * against half-loaded globals. Memoize the in-flight promise and await it.
+ */
+let runtimeReady: Promise<void> | null = null;
+function ensureRuntimes(): Promise<void> {
+    if (!runtimeReady) runtimeReady = initAllRuntimes();
+    return runtimeReady;
+}
 
 function decodeBase64(str: string): string {
     try {
@@ -174,7 +187,7 @@ function runPreview(block: HTMLElement) {
     const code = decodeBase64(codeBase64);
     void (async () => {
         try {
-            if (!isRuntimeInitialized()) await initAllRuntimes();
+            await ensureRuntimes();
             setLoading(true);
             setError(null);
             // Let the runtime injection settle before executing.
@@ -335,14 +348,10 @@ export function initLiveCodeBlocks(options?: PlaygroundConfig) {
         });
     }
 
-    if (!isRuntimeInitialized()) {
-        initAllRuntimes().then(enhancePreviewBlocks).catch((err) => {
-            console.warn('[live-code] Some runtimes failed to initialize:', err);
-            enhancePreviewBlocks();
-        });
-    } else {
+    ensureRuntimes().then(enhancePreviewBlocks).catch((err) => {
+        console.warn('[live-code] Some runtimes failed to initialize:', err);
         enhancePreviewBlocks();
-    }
+    });
 }
 
 if (typeof document !== 'undefined') {

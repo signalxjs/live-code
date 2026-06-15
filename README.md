@@ -10,7 +10,7 @@ Full guides, API reference and live examples → **<https://sigx.dev/>**
 
 ## Why this exists
 
-Documentation is much more useful when readers can edit the code and immediately see the result. `@sigx/live-code` gives you a drop-in `<LiveCodeBlock>` component (and a `LivePreview` island for SSG) so docs authors can ship interactive examples without each page rolling its own playground.
+Documentation is much more useful when readers can edit the code and immediately see the result. `@sigx/live-code` gives you a drop-in `<LiveCodeBlock>` component (and progressively-enhanced inline previews for SSG) so docs authors can ship interactive examples without each page rolling its own playground.
 
 The Monaco editor is loaded on demand from [`@sigx/monaco-editor`](https://sigx.dev/monaco/), which ships prebundled assets and a Vite plugin that bypasses dependency optimization — so Monaco doesn't slow down the cold start of every consumer app.
 

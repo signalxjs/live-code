@@ -4,7 +4,7 @@
  * Monaco Editor type definitions for SignalX packages.
  * Generated using dts-bundle-generator from actual source files.
  * 
- * Generated: 2026-05-12T09:08:03.028Z
+ * Generated: 2026-06-15T21:06:40.327Z
  * 
  * To regenerate: pnpm run generate:types
  */
@@ -166,7 +166,7 @@ interface CSSProperties {
 // JSX Attribute Interfaces at top level (extracted from namespace JSX)
 
 interface DirectiveAttributeExtensions {
- *             'use:myDirective'?: DirectiveDefinition<string> | [DirectiveDefinition<string>, string];
+ *             'use:myDirective'?: JSX.DirectiveAttribute<string>;
  *         }
 
 interface DirectiveAttributeExtensions {
@@ -522,6 +522,7 @@ interface HTMLAttributes<T = HTMLElement>, DirectiveAttributeExtensions {
 interface FormElementAttributes<T = HTMLElement, V = any> extends HTMLAttributes<T> {
     model?: [object, string] | (() => V) | Model<any>;
     [key: \`model:\${string}\`]: [object, string] | (() => any);
+    modelModifiers?: ModelModifiers;
     "onUpdate:modelValue"?: (value: V) => void;
 }
 
@@ -544,6 +545,7 @@ interface CheckboxInputAttributes<T = HTMLInputElement> extends HTMLAttributes<T
     model?: [object, string] | (() => boolean | any[] | string | number) | Model<any>;
     "onUpdate:modelValue"?: (checked: boolean) => void;
     [key: \`model:\${string}\`]: [object, string] | (() => any);
+    modelModifiers?: ToggleModelModifiers;
 }
 
 interface TextInputAttributes<T = HTMLInputElement> extends FormElementAttributes<T, string> {
@@ -806,6 +808,8 @@ interface SVGAttributes<T = SVGElement> extends HTMLAttributes<T> {
     zoomAndPan?: string;
 }
 
+type DirectiveAttribute<T, El = HTMLElement> = T | import('@sigx/runtime-core').DirectiveDefinition<T, El> | [import('@sigx/runtime-core').DirectiveDefinition<T, El>, T];
+
 type InputHTMLAttributes<T = HTMLInputElement> = NumberInputAttributes<T> | RangeInputAttributes<T> | CheckboxInputAttributes<T> | TextInputAttributes<T>;
 
 type SelectHTMLAttributes<T = HTMLSelectElement> = SingleSelectAttributes<T> | MultiSelectAttributes<T>;
@@ -1026,6 +1030,104 @@ export const sigxModuleTypes = `declare module "sigx" {
     	string
     ], originalProps: Record<string, any>) => boolean;
     /**
+     * Register an extension model processor for intrinsic elements.
+     *
+     * Extension processors run BEFORE the platform processor, in registration
+     * order, until one returns true — so packs (custom elements, widget
+     * libraries) can add model handling without replacing the platform's.
+     * Registering the same function twice is a no-op.
+     */
+    export declare function registerModelProcessor(fn: ModelProcessor): void;
+    /**
+     * Shared, pluggable primitive for \`model\` directive modifiers.
+     *
+     * Modifiers come in two flavours:
+     * - **value transforms** (\`trim\`, \`number\`, custom) — pure value→value functions
+     *   applied at the write-back boundary in the JSX runtime, so every binding path
+     *   (default \`model\`, named \`model:name\`, generic fallback, custom processors,
+     *   components) and every platform (DOM, Lynx, SSR) honors them with no extra code.
+     * - **timing** (\`lazy\`, \`debounce\`) — a declarative hint platforms map to their own
+     *   event model (DOM \`input\`→\`change\`; Lynx \`bindinput\`/blur). Debounce scheduling
+     *   is platform-agnostic ({@link createDebounceScheduler}) but the platform owns the
+     *   event wiring and cleanup, since the cancel handle is tied to its listener lifecycle.
+     *
+     * This module is dependency-free (mirrors \`platform.ts\`) so it can be imported from
+     * any layer without circular-init concerns.
+     */
+    export type ModelModifierTiming = "lazy" | "debounce";
+    export interface ModelModifierContext {
+    	/** The raw modifier value, e.g. \`true\`, \`300\`, or a custom config object. */
+    	option: unknown;
+    	/** The full modifiers object, so a transform can read sibling flags. */
+    	modifiers: Record<string, unknown>;
+    }
+    export interface ModelModifierDef {
+    	/**
+    	 * Platform-agnostic value transform applied at write-back. Receives the raw
+    	 * value the platform extracted and returns the value to write to the binding.
+    	 */
+    	transform?: (value: any, ctx: ModelModifierContext) => any;
+    	/**
+    	 * Declarative timing hint platforms map to their own event model. Modifiers
+    	 * with a \`timing\` (and no \`transform\`) are skipped by {@link applyModelTransforms}.
+    	 */
+    	timing?: ModelModifierTiming;
+    }
+    /**
+     * Register a \`model\` modifier (public API), symmetric with \`registerModelProcessor\`.
+     *
+     * A modifier is either a value transform, a timing hint, or both. Built-ins
+     * (\`trim\`, \`number\`, \`lazy\`, \`debounce\`) are registered through this same
+     * mechanism. To make a custom modifier type-check in JSX, also augment the
+     * matching capability group ({@link ValueModelModifiers} for transforms,
+     * {@link TimingModelModifiers} for timing) via declaration merging.
+     *
+     * @returns An unregister function that removes this modifier.
+     *
+     * @example
+     * \`\`\`ts
+     * declare module '@sigx/runtime-core' {
+     *   interface ValueModelModifiers { uppercase?: boolean }
+     * }
+     * registerModelModifier('uppercase', {
+     *   transform: (v) => typeof v === 'string' ? v.toUpperCase() : v,
+     * });
+     * \`\`\`
+     */
+    export declare function registerModelModifier(name: string, def: ModelModifierDef): () => void;
+    /**
+     * Value-transform modifiers. Meaningful only where the bound value is (or can be)
+     * a string — text/number/range/textarea/select. Augment to add custom transforms.
+     */
+    export interface ValueModelModifiers {
+    	/** Strip leading/trailing whitespace before write-back. */
+    	trim?: boolean;
+    	/** Coerce the value to a number (no-op if not numeric). */
+    	number?: boolean;
+    }
+    /**
+     * Timing modifiers — change *when* write-back fires. Meaningful on every
+     * model-bound element. Augment to add custom timing modifiers.
+     */
+    export interface TimingModelModifiers {
+    	/** Sync on \`change\` (blur/enter) instead of every keystroke. */
+    	lazy?: boolean;
+    	/** Delay write-back by N ms (\`true\` ⇒ 300ms). */
+    	debounce?: number | boolean;
+    }
+    /**
+     * Full modifier set for value-bearing form elements
+     * (text/number/range/textarea/select) — value transforms + timing.
+     */
+    export interface ModelModifiers extends ValueModelModifiers, TimingModelModifiers {
+    }
+    /**
+     * Modifier set for toggle elements (checkbox/radio) — timing only.
+     * \`trim\`/\`number\` are intentionally absent (no-ops for boolean/array values).
+     */
+    export interface ToggleModelModifiers extends TimingModelModifiers {
+    }
+    /**
      * Component plugin registry for runtime-core.
      *
      * This module has NO IMPORTS to ensure it's fully initialized before
@@ -1039,6 +1141,7 @@ export const sigxModuleTypes = `declare module "sigx" {
     export type ComponentPlugin = {
     	onDefine?: (name: string | undefined, factory: Function, setup: Function) => void;
     };
+    declare function registerComponentPlugin(plugin: ComponentPlugin): void;
     declare const MODEL_SYMBOL: unique symbol;
     /** The binding tuple for Model<T>: [sourceObject, key, updateHandler] */
     export type ModelBindingTuple<T> = readonly [
@@ -1116,12 +1219,47 @@ export const sigxModuleTypes = `declare module "sigx" {
     /** Symbol to identify computed values */
     export declare const ComputedSymbol: unique symbol;
     export type EffectFn = () => void;
+    /**
+     * Custom scheduling hook for effects. When provided, notifications hand
+     * the effect's \`run\` job to the scheduler instead of executing it; the
+     * scheduler decides when (and whether once-deduplicated) to invoke it.
+     * The job validates its sources when invoked, so a queued job whose
+     * sources turn out unchanged is a no-op, as is a job whose effect was
+     * stopped in the meantime.
+     */
+    export type EffectScheduler = (run: () => void) => void;
+    export interface EffectOptions {
+    	scheduler?: EffectScheduler;
+    }
     export interface EffectRunner<T = void> {
     	(): T;
     	stop: () => void;
     }
-    export interface ReactiveEffect extends EffectFn {
-    	deps: Set<ReactiveEffect>[];
+    /**
+     * A dependency slot: one tracked property/key of one signal, or a
+     * computed's output. \`version\` increments on every definite value change,
+     * letting subscribers validate "did this source really change?" without
+     * recomputing.
+     */
+    export interface Dep {
+    	subs: Set<Subscriber>;
+    	version: number;
+    	/** Present iff this dep is a computed's output dep. */
+    	computed?: Subscriber;
+    }
+    /** A subscriber's edge to one Dep, with the version seen at track time. */
+    export interface Link {
+    	dep: Dep;
+    	version: number;
+    }
+    export interface Subscriber extends EffectFn {
+    	deps: Link[];
+    	/** Dirtiness state (CLEAN / DIRTY / MAYBE_DIRTY / COMPUTING). */
+    	flags: number;
+    	/** Present iff this subscriber is a computed node: its output dep. */
+    	ownDep?: Dep;
+    	/** Present iff this subscriber is a computed node: pull/validate. */
+    	refresh?: () => void;
     }
     /**
      * Widens literal types to their base primitive types.
@@ -1173,7 +1311,7 @@ export const sigxModuleTypes = `declare module "sigx" {
     }
     export type EffectScope = {
     	run<T>(fn: () => T): T | undefined;
-    	stop(fromParent?: boolean): void;
+    	stop(): void;
     };
     /**
      * Batch multiple reactive updates into a single flush.
@@ -1200,7 +1338,7 @@ export const sigxModuleTypes = `declare module "sigx" {
      * runner.stop();
      * \`\`\`
      */
-    export declare function effect(fn: EffectFn): EffectRunner;
+    export declare function effect(fn: EffectFn, options?: EffectOptions): EffectRunner;
     /**
      * Execute a function without tracking any reactive dependencies.
      * Useful for reading signals inside an effect without creating a subscription.
@@ -1215,6 +1353,9 @@ export const sigxModuleTypes = `declare module "sigx" {
     export declare function untrack<T>(fn: () => T): T;
     /**
      * Create an effect scope that collects reactive effects for bulk disposal.
+     * Effects and watchers created synchronously inside \`run()\` are disposed by
+     * \`stop()\`. Scopes created inside another scope's \`run()\` are stopped with
+     * their parent unless created with \`effectScope(true)\` (detached).
      *
      * @example
      * \`\`\`ts
@@ -1226,9 +1367,9 @@ export const sigxModuleTypes = `declare module "sigx" {
      * scope.stop(); // disposes both effects
      * \`\`\`
      */
-    export declare function effectScope(_detached?: boolean): {
+    export declare function effectScope(detached?: boolean): {
     	run<T>(fn: () => T): T | undefined;
-    	stop(fromParent?: boolean): void;
+    	stop(): void;
     };
     /**
      * Returns the raw, original object from a reactive proxy.
@@ -1258,6 +1399,26 @@ export const sigxModuleTypes = `declare module "sigx" {
     	string | symbol
     ] | null;
     /**
+     * Dev-only variant of {@link detectAccess} that also reports whether the
+     * selector returned a value different from the last property it read.
+     *
+     * A valid model getter is a property-access chain whose return value IS the
+     * leaf property (\`() => state.a.b\` returns \`state.a.b\`; a writable computed
+     * \`() => c.value\` returns \`c.value\`). A transformed expression like
+     * \`() => transform(state.x)\` or \`() => state.count * 2\` returns something
+     * other than the property it read, which means a two-way binding would write
+     * the transformed value back into that property — almost never the intent.
+     *
+     * @internal Used by the JSX runtime to warn in development.
+     */
+    export declare function detectAccessDev(selector: () => any): {
+    	access: [
+    		any,
+    		string | symbol
+    	] | null;
+    	looksTransformed: boolean;
+    };
+    /**
      * Create a reactive signal from a value.
      *
      * For primitives, wraps the value as \`{ value: T }\` — access and mutate via \`.value\`.
@@ -1275,6 +1436,53 @@ export const sigxModuleTypes = `declare module "sigx" {
      */
     export declare function signal<T extends Primitive>(target: T): PrimitiveSignal<T>;
     export declare function signal<T extends object>(target: T): Signal<T>;
+    /**
+     * A signal-shaped live view over a single property of a reactive object.
+     * Reads and writes delegate to the source, so reactivity is preserved.
+     */
+    export type PropertySignal<T> = {
+    	value: T;
+    };
+    /**
+     * Property keys eligible for toSignal/toSignals: string keys excluding
+     * \`\$set\` (the object-signal's replace method injected by the proxy — not
+     * data). Note that \`toSignals()\` additionally only creates views for keys
+     * \`Object.keys\` yields at runtime (own enumerable keys).
+     */
+    export type SignalKey<T> = Exclude<Extract<keyof T, string>, "\$set">;
+    /**
+     * Create a signal-shaped view over one property of a reactive object.
+     * Unlike destructuring (which snapshots the value), the returned object
+     * reads and writes through to the source, so tracking and triggering work.
+     *
+     * @example
+     * \`\`\`ts
+     * const state = signal({ count: 0 });
+     * const count = toSignal(state, 'count');
+     * count.value++;        // triggers effects watching state.count
+     * \`\`\`
+     */
+    export declare function toSignal<T extends object, K extends SignalKey<T>>(source: T, key: K): PropertySignal<T[K]>;
+    /**
+     * Per-key views of a reactive object. The homomorphic key-remapped map
+     * preserves optional property markers from T; at runtime, views exist only
+     * for keys Object.keys yields (own enumerable string keys).
+     */
+    export type ToSignals<T extends object> = {
+    	[K in keyof T as K extends SignalKey<T> ? K : never]: PropertySignal<T[K]>;
+    };
+    /**
+     * Create signal-shaped views for every own enumerable property of a reactive
+     * object, so it can be destructured without losing reactivity.
+     *
+     * @example
+     * \`\`\`ts
+     * const state = signal({ count: 0, name: 'Ada' });
+     * const { count, name } = toSignals(state);
+     * count.value++;        // still reactive
+     * \`\`\`
+     */
+    export declare function toSignals<T extends object>(source: T): ToSignals<T>;
     /**
      * Watch a reactive source and run a callback when it changes.
      * Supports deep watching, immediate invocation, and pause/resume.
@@ -1407,7 +1615,7 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 */
     	type Slot<TName extends string, TProps = void> = {
     		__slots?: {
-    			[K in TName]: TProps extends void ? () => JSXElement | JSXElement[] | null : (props: TProps) => JSXElement | JSXElement[] | null;
+    			[K in TName]?: TProps extends void ? () => JSXElement | JSXElement[] | null : (props: TProps) => JSXElement | JSXElement[] | null;
     		};
     	};
     	/**
@@ -1425,11 +1633,6 @@ export const sigxModuleTypes = `declare module "sigx" {
     	};
     }
     /**
-     * Define a single prop with type, required/optional status
-     * @deprecated Use \`Define.Prop\` instead
-     */
-    export type DefineProp<TName extends string, TType, Required extends boolean = false> = Define.Prop<TName, TType, Required>;
-    /**
      * Model binding tuple type - [stateObject, key] for forwarding
      * The state object can be a Signal or any object with the given key
      */
@@ -1437,45 +1640,6 @@ export const sigxModuleTypes = `declare module "sigx" {
     	object,
     	string
     ];
-    /**
-     * Define a 2-way bound model.
-     *
-     * The component receives a Model<T> object with:
-     *   - \`.value\` - Get or set the current value
-     *   - \`.binding\` - The underlying binding for forwarding
-     *
-     * Default form: DefineModel<T>
-     *   - props.model: Model<T> (read/write/forward)
-     *   - props.model.value to read/write
-     *   - <Child model={props.model} /> to forward
-     *
-     * Named form: DefineModel<"name", T>
-     *   - props.name: Model<T> (read/write/forward)
-     *   - props.name.value to read/write
-     *   - <Child model={props.name} /> to forward
-     *
-     * Callers use: model={() => state.prop} or model:name={() => state.prop}
-     *
-     * @example
-     * \`\`\`tsx
-     * interface InputProps extends DefineModel<string> {
-     *     placeholder?: string;
-     * }
-     *
-     * const Input = component<InputProps>(({ props }) => {
-     *     // Read
-     *     console.log(props.model.value);
-     *
-     *     // Write
-     *     props.model.value = "new value";
-     *
-     *     // Forward
-     *     <Child model={props.model} />
-     * });
-     * \`\`\`
-     * @deprecated Use \`Define.Model\` instead
-     */
-    export type DefineModel<TNameOrType, TType = void> = Define.Model<TNameOrType, TType>;
     /**
      * Extract model binding definitions from a component props type.
      * Used at JSX level to allow binding tuples for model props.
@@ -1501,26 +1665,17 @@ export const sigxModuleTypes = `declare module "sigx" {
     	__eventDetail: T;
     };
     /**
-     * Define a single custom event with its detail type
-     * @deprecated Use \`Define.Event\` instead
-     */
-    export type DefineEvent<TName extends string, TDetail = void> = Define.Event<TName, TDetail>;
-    /**
-     * Define a slot with optional scoped props.
-     * - DefineSlot<"header"> - a simple slot named "header"
-     * - DefineSlot<"item", { item: T; index: number }> - a scoped slot with props
-     * @deprecated Use \`Define.Slot\` instead
-     */
-    export type DefineSlot<TName extends string, TProps = void> = Define.Slot<TName, TProps>;
-    /**
      * Default slot function type
      */
     export type DefaultSlot = () => JSXElement[];
     /**
-     * Slots object passed to components - always has default, plus any declared slots
+     * Slots object passed to components. Every slot — \`default\` included — is a
+     * callable accessor only when the parent provided content for it; an
+     * unprovided slot reads as \`undefined\`, so check presence with
+     * \`slots.x?.()\` / \`slots.x?.() ?? fallback\`.
      */
     export type SlotsObject<TSlots = {}> = {
-    	default: DefaultSlot;
+    	default?: DefaultSlot;
     } & TSlots;
     /**
      * Extract event names from an event definition
@@ -1641,10 +1796,6 @@ export const sigxModuleTypes = `declare module "sigx" {
      * Can be sync or async - async setup is awaited on server, runs sync on client hydration.
      */
     export type SetupFn<TProps extends Record<string, any> = {}, TEvents extends Record<string, any> = {}, TRef = any, TSlots = {}> = (ctx: ComponentSetupContext<PlatformElement, TProps, TEvents, TRef, TSlots>) => ViewFn | Promise<ViewFn>;
-    /**
-     * @deprecated Use \`Define.Expose\` instead
-     */
-    export type DefineExpose<T> = Define.Expose<T>;
     export type Ref<T> = {
     	current: T | null;
     } | ((instance: T | null) => void);
@@ -1836,7 +1987,7 @@ export const sigxModuleTypes = `declare module "sigx" {
      * Get component metadata (for DevTools)
      */
     export declare function getComponentMeta(factory: Function): {
-    	name?: string | undefined;
+    	name?: string;
     	setup: SetupFn<any, any, any, any>;
     } | undefined;
     export type ExtractExposed<T> = "__exposed" extends keyof T ? (NonNullable<T["__exposed"]> extends {
@@ -1856,7 +2007,7 @@ export const sigxModuleTypes = `declare module "sigx" {
      *
      * @example
      * \`\`\`tsx
-     * type CardProps = DefineProp<"title", string> & DefineSlot<"header">;
+     * type CardProps = Define.Prop<"title", string> & Define.Slot<"header">;
      *
      * export const Card = component<CardProps>((ctx) => {
      *     const { title } = ctx.props;
@@ -1865,7 +2016,7 @@ export const sigxModuleTypes = `declare module "sigx" {
      *     return () => (
      *         <div class="card">
      *             {slots.header?.() ?? <h2>{title}</h2>}
-     *             {slots.default()}
+     *             {slots.default?.()}
      *         </div>
      *     );
      * });
@@ -1877,6 +2028,14 @@ export const sigxModuleTypes = `declare module "sigx" {
      */
     export interface InjectableFunction<T> {
     	(): T;
+    	_factory: () => T;
+    	_token: symbol;
+    }
+    /**
+     * The metadata defineProvide actually needs — satisfied by both
+     * InjectableFunction and parameterized FactoryFunction use-functions.
+     */
+    export interface Providable<T> {
     	_factory: () => T;
     	_token: symbol;
     }
@@ -1905,7 +2064,7 @@ export const sigxModuleTypes = `declare module "sigx" {
      * Provide a new instance of an injectable at the current component level.
      * Child components will receive this instance when calling the injectable function.
      *
-     * @param useFn - The injectable function created by defineInjectable
+     * @param useFn - A use-function created by defineInjectable or defineFactory
      * @param factory - Optional custom factory to create the instance (overrides default)
      *
      * @example
@@ -1929,10 +2088,12 @@ export const sigxModuleTypes = `declare module "sigx" {
      * });
      * \`\`\`
      */
-    export declare function defineProvide<T>(useFn: InjectableFunction<T>, factory?: () => T): T;
+    export declare function defineProvide<T>(useFn: Providable<T>, factory?: () => T): T;
     /**
      * Get the current AppContext from the component tree.
      * The AppContext is provided at the root component level during mount/hydrate/SSR.
+     * Outside any component, returns the context made current by
+     * \`app.runWithContext(fn)\`, or null.
      *
      * @example
      * \`\`\`typescript
@@ -2006,6 +2167,13 @@ export const sigxModuleTypes = `declare module "sigx" {
     export interface DirectiveDefinition<T = any, El = any> extends DirectiveDefinitionExtensions<T> {
     	/** Called after the element is created but before it is inserted into the DOM */
     	created?(el: El, binding: DirectiveBinding<T>): void;
+    	/**
+    	 * Server rendering: produce props to merge into the element's HTML
+    	 * (e.g. \`style\`, \`class\`, attributes). Directives are isomorphic — the
+    	 * definition declares its server behavior alongside its DOM hooks; the
+    	 * server renderer reads this hook when serializing the element.
+    	 */
+    	getSSRProps?(binding: DirectiveBinding<T>): Record<string, any> | void;
     	/** Called after the element is inserted into the DOM */
     	mounted?(el: El, binding: DirectiveBinding<T>): void;
     	/** Called when the binding value changes */
@@ -2107,6 +2275,8 @@ export const sigxModuleTypes = `declare module "sigx" {
     	app: App;
     	/** App-level provides (available via inject in all components) */
     	provides: Map<symbol, unknown>;
+    	/** Dispose callbacks for app-owned instances, run on app.unmount() */
+    	disposables: Set<() => void>;
     	/** App configuration */
     	config: AppConfig;
     	/** Lifecycle hooks from all plugins */
@@ -2215,8 +2385,8 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 * Provide a new instance of an injectable at app level.
     	 * All components will receive this instance when calling the injectable function.
     	 *
-    	 * @param useFn - An injectable function created by defineInjectable
-    	 * @param factory - Optional custom factory. If not provided, uses the injectable's default factory.
+    	 * @param useFn - A use-function created by defineInjectable or defineFactory
+    	 * @param factory - Optional custom factory. If not provided, uses the use-function's default factory.
     	 * @returns The created instance
     	 *
     	 * @example
@@ -2233,7 +2403,39 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 * app.defineProvide(useApiConfig, () => ({ baseUrl: 'https://other.api.com' }));
     	 * \`\`\`
     	 */
-    	defineProvide<T>(useFn: InjectableFunction<T>, factory?: () => T): T;
+    	defineProvide<T>(useFn: Providable<T>, factory?: () => T): T;
+    	/**
+    	 * Run a function with this app's context as the current DI context.
+    	 * Injections made inside the callback — use-functions from
+    	 * \`defineInjectable\`/\`defineFactory\`, and \`useAppContext()\` — resolve to
+    	 * THIS app's instances, the same ones components receive, instead of the
+    	 * realm-level fallback.
+    	 *
+    	 * Use it for code that runs outside component setup but belongs to the
+    	 * app: router navigation guards, socket/event handlers, entry-scope
+    	 * bootstrap code. Plugins receive the app in \`install()\` and can capture
+    	 * it to wrap their own callbacks.
+    	 *
+    	 * The context applies only to the **synchronous** portion of \`fn\` — it is
+    	 * restored before any awaited continuation runs. After an \`await\`,
+    	 * re-enter with another \`runWithContext\` call if you need to resolve more
+    	 * dependencies. Nested calls are supported; the previous context is
+    	 * restored when \`fn\` returns (or throws).
+    	 *
+    	 * @example
+    	 * \`\`\`typescript
+    	 * const useAuthStore = defineFactory(() => createAuthStore(), 'scoped');
+    	 *
+    	 * router.beforeEach((to) => {
+    	 *     // Same instance the app's components see — not a realm copy.
+    	 *     const auth = app.runWithContext(() => useAuthStore());
+    	 *     if (!auth.isAuthenticated && to.meta.requiresAuth) return '/login';
+    	 * });
+    	 * \`\`\`
+    	 *
+    	 * @returns The return value of \`fn\`.
+    	 */
+    	runWithContext<T>(fn: () => T): T;
     	/**
     	 * Register lifecycle hooks to observe all components
     	 */
@@ -2259,7 +2461,7 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 * Mount the app to a container.
     	 *
     	 * If a mount function is not provided, the platform's default mount function
-    	 * will be used (set via setDefaultMount by runtime-dom, runtime-terminal, etc.)
+    	 * will be used (set via setDefaultMount by the active platform package).
     	 *
     	 * @example
     	 * \`\`\`tsx
@@ -2436,51 +2638,88 @@ export const sigxModuleTypes = `declare module "sigx" {
      */
     export declare function isLazyComponent(component: any): component is LazyComponentFactory<any>;
     /**
-     * useAsync — composable for loading async dependencies in components.
+     * useAsync / useStream — THE async-data primitives.
      *
-     * Wraps an async loader in a reactive signal with loading/error states.
-     * No renderer changes required — works with sigx's existing effect system.
+     * One rule: give it a KEY and it becomes server-transferable.
      *
-     * @example
-     * \`\`\`tsx
-     * import { component, useAsync } from 'sigx';
+     *   useAsync(fn)            → unkeyed: client-only async work
+     *   useAsync(key, fn, opts) → keyed: runs on the server, value serialized
+     *                             under the key, restored on hydration, deduped
+     *                             per key within a request/page
+     *   useStream(key, source)  → progressive text (LLM-token-style): streams
+     *                             on the server, restored on hydration, live on
+     *                             client navigation
      *
-     * const CodeEditor = component(({ signal: s }) => {
-     *     const libs = useAsync(async () => {
-     *         const { EditorView } = await import('@codemirror/view');
-     *         const { json } = await import('@codemirror/lang-json');
-     *         return { EditorView, json };
-     *     });
+     * This module provides the default CLIENT semantics. Server renderers
+     * install per-instance providers (\`_useAsync\` / \`_useStream\` on the setup
+     * context) that take over during SSR — same pattern as the \`ssr\` helper.
      *
-     *     return () => {
-     *         if (libs.loading) return <div class="skeleton" />;
-     *         if (libs.error) return <div class="error">{libs.error.message}</div>;
-     *         return <div ref={el => new libs.value!.EditorView({ parent: el })} />;
-     *     };
-     * });
-     * \`\`\`
+     * Design doc: docs/rfc-use-async.md.
      */
-    /**
-     * Reactive state returned by useAsync.
-     */
-    export interface AsyncState<T> {
-    	/** The resolved value, or null while loading / on error. */
-    	readonly value: T | null;
-    	/** True while the loader is in progress. */
-    	readonly loading: boolean;
-    	/** The error if the loader rejected, or null. */
-    	readonly error: Error | null;
+    export interface AsyncFetcherContext {
+    	/**
+    	 * Pass it straight to fetch():  fetch(url, { signal })
+    	 *
+    	 * Unkeyed calls: aborted when the component unmounts or a refresh()
+    	 * supersedes the run. Keyed calls: the fetch may be SHARED by several
+    	 * components (dedupe), so the signal is detached from any single
+    	 * consumer's lifecycle — each consumer independently stops observing
+    	 * the result when it unmounts.
+    	 */
+    	signal: AbortSignal;
+    }
+    export interface AsyncOptions {
+    	/**
+    	 * Throw fetch errors when \`.error\` is read during render instead of
+    	 * exposing them — routes to the nearest error boundary / component
+    	 * error fallback. Default: false.
+    	 */
+    	throwOnError?: boolean;
+    	/**
+    	 * (Keyed form.) Run the fetcher on the server. Default: true.
+    	 * \`server: false\` renders the loading branch during SSR and fetches on
+    	 * the client after hydration.
+    	 */
+    	server?: boolean;
     }
     /**
-     * Load an async resource inside a component's setup function.
-     *
-     * Returns a reactive object with \`value\`, \`loading\`, and \`error\` fields.
-     * The component's render function re-runs automatically when the state changes.
-     *
-     * @param loader — async function that returns the resource
-     * @returns reactive AsyncState
+     * Reactive async state. Reading \`value\` / \`loading\` / \`error\` inside a
+     * render function subscribes it — the component re-renders on change.
      */
-    export declare function useAsync<T>(loader: () => Promise<T>): AsyncState<T>;
+    export interface AsyncState<T> {
+    	/**
+    	 * The last successfully resolved data. Null until the first success.
+    	 * KEPT while a refresh() is in flight (stale-while-revalidate — check
+    	 * \`loading\` to show a revalidation indicator without dropping content).
+    	 * Cleared when a fetch fails: \`value\` and \`error\` are mutually
+    	 * exclusive, so success and error branches never render together.
+    	 */
+    	readonly value: T | null;
+    	/** True while a fetcher is in flight (including refreshes). */
+    	readonly loading: boolean;
+    	/** The fetch error, or null. While set, \`value\` is null. */
+    	readonly error: Error | null;
+    	/** Re-run the fetcher (client; no-op during SSR). Aborts an in-flight run. */
+    	refresh(): Promise<void>;
+    }
+    /** Unkeyed: client-only async work. The fetcher never runs on the server. */
+    export declare function useAsync<T>(fetcher: (ctx: AsyncFetcherContext) => Promise<T>, options?: AsyncOptions): AsyncState<T>;
+    /** Keyed: runs on the server, serialized under \`key\`, restored on hydration. */
+    export declare function useAsync<T>(key: string, fetcher: (ctx: AsyncFetcherContext) => Promise<T>, options?: AsyncOptions): AsyncState<T>;
+    /**
+     * Progressive text (LLM-token-style). Returns a string signal that
+     * accumulates the source's chunks.
+     *
+     * - Server, streaming: tokens append into the page as they arrive; the
+     *   final text swaps in and is serialized under \`key\`.
+     * - Server, blocking: drained fully, final text inline.
+     * - Client, hydrating: final text restored from \`key\` — the source is NOT
+     *   re-run (no duplicate LLM calls).
+     * - Client, navigation: runs live; the signal updates per chunk.
+     */
+    export declare function useStream(key: string, source: () => AsyncIterable<string>): {
+    	readonly value: string;
+    };
     /**
      * Props for the ErrorBoundary component
      */
@@ -2493,7 +2732,7 @@ export const sigxModuleTypes = `declare module "sigx" {
      * Provides a \`retry\` function to reset and re-render children.
      */
     export declare const ErrorBoundary: ComponentFactory<ErrorBoundaryProps, void, {
-    	default: () => JSXElement[] | JSXElement;
+    	default?: (() => JSXElement | JSXElement[] | null) | undefined;
     }>;
     /**
      * Structured error system for SignalX runtime.
@@ -2547,31 +2786,81 @@ export const sigxModuleTypes = `declare module "sigx" {
     export declare function asyncSetupClientError(componentName: string): SigxError;
     export declare function provideOutsideSetupError(): SigxError;
     export declare function provideInvalidInjectableError(): SigxError;
+    /** Check whether a value is thenable (Promise-like). */
+    export declare function isPromise(value: any): boolean;
+    /** @deprecated Use the {@link isPromise} function export instead. Kept until dependents (e.g. @sigx/store) migrate. */
     export declare class Utils {
     	static isPromise(value: any): boolean;
     }
     declare function guid(): string;
     type guid\$1 = string;
     declare const guid\$1: typeof guid;
-    export declare enum InstanceLifetimes {
-    	Transient = 0,
-    	Scoped = 1,
-    	Singleton = 2
-    }
+    /**
+     * Instance lifetime for factories created with \`defineFactory\`.
+     *
+     * - \`'singleton'\` — one instance per \`AppContext\`, disposed on \`app.unmount()\`.
+     *   Outside any app context, falls back to one instance per JS realm.
+     * - \`'scoped'\` — the nearest instance provided via \`defineProvide\` in the
+     *   component tree; falls back to the app-context (singleton) instance, and
+     *   outside any app/component context to the per-realm instance (same
+     *   fallback as \`'singleton'\`).
+     * - \`'transient'\` — a new instance per call, disposed with the calling
+     *   component (or manually via \`dispose()\`).
+     */
+    export type Lifetime = "singleton" | "scoped" | "transient";
     export interface Subscription {
     	unsubscribe(): void;
     }
     export interface Topic<T> {
+    	/** Deliver to all subscribers. Handler errors are isolated. No-op when disposed. */
     	publish(data: T): void;
+    	/** Subscribe to messages. Throws if the topic is destroyed. */
     	subscribe(handler: (data: T) => void): Subscription;
+    	/** Remove all subscribers and unregister; idempotent. */
     	destroy(): void;
+    	/** Tooling metadata — never an app-level lookup path. */
+    	readonly namespace?: string;
+    	/** Tooling metadata — never an app-level lookup path. */
+    	readonly name?: string;
+    	readonly subscriberCount: number;
+    	readonly hasSubscribers: boolean;
+    	readonly disposed: boolean;
     }
-    export declare function createTopic<T>(_options?: {
+    export interface CreateTopicOptions {
+    	/** Tooling metadata; topics WITH a namespace register in the inspection registry. */
     	namespace?: string;
+    	/** Tooling metadata. */
     	name?: string;
-    }): Topic<T>;
+    	/** Called when subscriberCount transitions 0 → 1 (refCount pattern). */
+    	onActivate?(): void;
+    	/** Called when subscriberCount transitions back to 0 (last unsubscribe or destroy). */
+    	onDeactivate?(): void;
+    }
+    export declare function createTopic<T>(options?: CreateTopicOptions): Topic<T>;
     export declare function toSubscriber<T>(topic: Topic<T>): {
     	subscribe: (handler: (data: T) => void) => Subscription;
+    };
+    /**
+     * A typed group of topics keyed by an event map — mitt-level DX on the Topic
+     * primitive. Topics are created lazily per key on first access (the event-map
+     * generic is erased at runtime, so keys are only known when touched) and are
+     * namespaced/registered like any other topic.
+     *
+     * @example
+     * \`\`\`ts
+     * const group = createTopicGroup<{ loggedIn: User; loggedOut: void }>({ namespace: 'auth#1.events' });
+     * group.topics.loggedIn.publish(user);          // payload type-checked
+     * group.topics.loggedIn.subscribe(u => ...);    // u: User
+     * group.destroy();                              // destroys all created topics
+     * \`\`\`
+     */
+    export declare function createTopicGroup<EventMap extends Record<string, any>>(options?: {
+    	namespace?: string;
+    }): {
+    	topics: {
+    		[K in keyof EventMap]: Topic<EventMap[K]>;
+    	};
+    	destroy(): void;
     };
     export declare class SubscriptionHandler {
     	private unsubs;
@@ -2583,14 +2872,52 @@ export const sigxModuleTypes = `declare module "sigx" {
     	subscriptions: SubscriptionHandler;
     	overrideDispose(onDispose: (fn: () => void) => void): void;
     }
-    export declare function defineFactory<InferReturnSetup>(setup: (ctx: SetupFactoryContext, ...args: unknown[]) => InferReturnSetup, lifetime: InstanceLifetimes, typeIdentifier?: guid\$1): InjectableFunction<InferReturnSetup & {
-    	dispose?: () => void;
+    /**
+     * A parameterized factory use-function: callable with the setup's params and
+     * carrying the provide metadata so it works with defineProvide/app.defineProvide.
+     */
+    export type FactoryFunction<TArgs extends unknown[], TInstance> = ((...args: TArgs) => TInstance) & {
+    	_factory: () => TInstance;
+    	_token: symbol;
+    };
+    export declare function defineFactory<InferReturnSetup>(setup: (ctx: SetupFactoryContext, ...args: unknown[]) => InferReturnSetup, lifetime: Lifetime, typeIdentifier?: guid\$1): InjectableFunction<InferReturnSetup & {
+    	dispose: () => void;
     }>;
-    export declare function defineFactory<InferReturnSetup, T1>(setup: (ctx: SetupFactoryContext, param1: T1) => InferReturnSetup, lifetime: InstanceLifetimes, typeIdentifier?: guid\$1): (param1: T1) => InferReturnSetup;
-    export declare function defineFactory<InferReturnSetup, T1, T2>(setup: (ctx: SetupFactoryContext, param1: T1, param2: T2) => InferReturnSetup, lifetime: InstanceLifetimes, typeIdentifier?: string): (param1: T1, param2: T2) => InferReturnSetup;
-    export declare function defineFactory<InferReturnSetup, T1, T2, T3>(setup: (ctx: SetupFactoryContext, param1: T1, param2: T2, param3: T3) => InferReturnSetup, lifetime: InstanceLifetimes, typeIdentifier?: guid\$1): (param1: T1, param2: T2, param3: T3) => InferReturnSetup;
-    export declare function defineFactory<InferReturnSetup, T1, T2, T3, T4>(setup: (ctx: SetupFactoryContext, param1: T1, param2: T2, param3: T3, param4: T4) => InferReturnSetup, lifetime: InstanceLifetimes, typeIdentifier?: guid\$1): (param1: T1, param2: T2, param3: T3, param4: T4) => InferReturnSetup;
-    export declare function defineFactory<InferReturnSetup, T1, T2, T3, T4, T5>(setup: (ctx: SetupFactoryContext, param1: T1, param2: T2, param3: T3, param4: T4, param5: T5) => InferReturnSetup, lifetime: InstanceLifetimes, typeIdentifier?: guid\$1): (param1: T1, param2: T2, param3: T3, param4: T4, param5: T5) => InferReturnSetup;
+    export declare function defineFactory<InferReturnSetup, T1>(setup: (ctx: SetupFactoryContext, param1: T1) => InferReturnSetup, lifetime: Lifetime, typeIdentifier?: guid\$1): FactoryFunction<[
+    	T1
+    ], InferReturnSetup & {
+    	dispose: () => void;
+    }>;
+    export declare function defineFactory<InferReturnSetup, T1, T2>(setup: (ctx: SetupFactoryContext, param1: T1, param2: T2) => InferReturnSetup, lifetime: Lifetime, typeIdentifier?: guid\$1): FactoryFunction<[
+    	T1,
+    	T2
+    ], InferReturnSetup & {
+    	dispose: () => void;
+    }>;
+    export declare function defineFactory<InferReturnSetup, T1, T2, T3>(setup: (ctx: SetupFactoryContext, param1: T1, param2: T2, param3: T3) => InferReturnSetup, lifetime: Lifetime, typeIdentifier?: guid\$1): FactoryFunction<[
+    	T1,
+    	T2,
+    	T3
+    ], InferReturnSetup & {
+    	dispose: () => void;
+    }>;
+    export declare function defineFactory<InferReturnSetup, T1, T2, T3, T4>(setup: (ctx: SetupFactoryContext, param1: T1, param2: T2, param3: T3, param4: T4) => InferReturnSetup, lifetime: Lifetime, typeIdentifier?: guid\$1): FactoryFunction<[
+    	T1,
+    	T2,
+    	T3,
+    	T4
+    ], InferReturnSetup & {
+    	dispose: () => void;
+    }>;
+    export declare function defineFactory<InferReturnSetup, T1, T2, T3, T4, T5>(setup: (ctx: SetupFactoryContext, param1: T1, param2: T2, param3: T3, param4: T4, param5: T5) => InferReturnSetup, lifetime: Lifetime, typeIdentifier?: guid\$1): FactoryFunction<[
+    	T1,
+    	T2,
+    	T3,
+    	T4,
+    	T5
+    ], InferReturnSetup & {
+    	dispose: () => void;
+    }>;
     /**
      * Component type checking utilities
      *
@@ -2621,45 +2948,6 @@ export const sigxModuleTypes = `declare module "sigx" {
      */
     export declare function isComponent(type: unknown): type is ComponentLike;
     /**
-     * Hydration utilities for SSR
-     *
-     * These utilities are shared between server-side rendering (stream.ts)
-     * and client-side hydration (hydrate.ts). They are placed in runtime-core
-     * to allow any SSR implementation to use them.
-     *
-     * @module
-     */
-    /**
-     * Client directive prefix used for selective hydration
-     */
-    export declare const CLIENT_DIRECTIVE_PREFIX = "client:";
-    /**
-     * Valid client directive names
-     */
-    export declare const CLIENT_DIRECTIVES: readonly [
-    	"client:load",
-    	"client:idle",
-    	"client:visible",
-    	"client:media",
-    	"client:only"
-    ];
-    export type ClientDirective = typeof CLIENT_DIRECTIVES[number];
-    /**
-     * Hydration strategies for client directives
-     */
-    export type HydrationStrategy = "load" | "idle" | "visible" | "media" | "only";
-    /**
-     * Result of getHydrationDirective
-     */
-    export interface HydrationDirective {
-    	strategy: HydrationStrategy;
-    	media?: string;
-    }
-    /** DOM platform sets HTMLElement as the default element type */
-    export interface PlatformTypes {
-    	element: HTMLElement;
-    }
-    /**
      * Render a SignalX element to a DOM container.
      * Supports both Element references and CSS selectors.
      *
@@ -2674,7 +2962,11 @@ export const sigxModuleTypes = `declare module "sigx" {
      * render(<App />, document.getElementById('app')!);
      * \`\`\`
      */
-    export declare const render: (element: JSXElement, container: string | Element, appContext?: AppContext | undefined) => void;
+    export declare const render: (element: JSXElement, container: Element | string, appContext?: AppContext) => void;
+    /** DOM platform sets HTMLElement as the default element type */
+    export interface PlatformTypes {
+    	element: HTMLElement;
+    }
     /**
      * A directive definition narrowed to DOM elements.
      * Use this type when defining directives for the DOM renderer.
@@ -2738,12 +3030,103 @@ export const sigxModuleTypes = `declare module "sigx" {
      * \`\`\`
      */
     export declare const show: DirectiveDefinition<boolean, HTMLElement>;
+    /**
+     * Head management composable — browser-standalone, SSR-enhanced.
+     *
+     * \`useHead()\` manages \`<head>\` elements (title, meta, link, script) from
+     * within components. In the browser it applies changes to the document
+     * directly and cleans them up on unmount. Under server rendering, the
+     * server walk installs a per-request context on the component instance and
+     * useHead collects into it (duck-typed — this package never imports server
+     * code); \`@sigx/server-renderer\` injects the collected tags into the
+     * document head.
+     *
+     * Layering rule: composables that run standalone in a browser live in core
+     * (sigx); only server machinery lives in @sigx/server-renderer.
+     *
+     * @example
+     * \`\`\`tsx
+     * import { component, useHead } from 'sigx';
+     *
+     * const MyPage = component(() => {
+     *     useHead({
+     *         title: 'My Page',
+     *         meta: [
+     *             { name: 'description', content: 'A great page' },
+     *             { property: 'og:title', content: 'My Page' }
+     *         ],
+     *         link: [
+     *             { rel: 'canonical', href: 'https://example.com/my-page' }
+     *         ]
+     *     });
+     *
+     *     return () => <div>Page content</div>;
+     * });
+     * \`\`\`
+     */
+    export interface HeadMeta {
+    	name?: string;
+    	property?: string;
+    	"http-equiv"?: string;
+    	charset?: string;
+    	content?: string;
+    	[key: string]: string | undefined;
+    }
+    export interface HeadLink {
+    	rel: string;
+    	href?: string;
+    	type?: string;
+    	crossorigin?: string;
+    	[key: string]: string | undefined;
+    }
+    export interface HeadScript {
+    	src?: string;
+    	type?: string;
+    	async?: boolean;
+    	defer?: boolean;
+    	innerHTML?: string;
+    	[key: string]: string | boolean | undefined;
+    }
+    export interface HeadConfig {
+    	/** Page title */
+    	title?: string;
+    	/** Title template — use %s as placeholder for the title */
+    	titleTemplate?: string;
+    	/** Meta tags */
+    	meta?: HeadMeta[];
+    	/** Link tags */
+    	link?: HeadLink[];
+    	/** Script tags */
+    	script?: HeadScript[];
+    	/** HTML language attribute */
+    	htmlAttrs?: {
+    		lang?: string;
+    		dir?: string;
+    		[key: string]: string | undefined;
+    	};
+    	/** Body attributes */
+    	bodyAttrs?: {
+    		class?: string;
+    		[key: string]: string | undefined;
+    	};
+    }
+    /**
+     * Manage \`<head>\` elements from within a component.
+     *
+     * Browser: applies to the document \`<head>\` directly; cleans up on
+     * component unmount. Server rendering: collects on the per-request render
+     * context for injection by the server renderer.
+     *
+     * @param config - Head configuration (title, meta, link, script, etc.)
+     */
+    export declare function useHead(config: HeadConfig): void;
 
     export {
     	Comment\$1 as Comment,
     	Plugin\$1 as Plugin,
     	Text\$1 as Text,
     	guid\$1 as guid,
+    	registerComponentPlugin as __registerComponentPlugin,
     };
 
 
@@ -3096,7 +3479,7 @@ export const routerModuleTypes = `declare module "@sigx/router" {
      * navigate({ path: '/blog', query: { page: '2' } });
      * \`\`\`
      */
-    export declare function useNavigate(): (to: RouteLocationRaw) => Promise<void | RouteLocation>;
+    export declare function useNavigate(): (to: RouteLocationRaw) => Promise<RouteLocation | void>;
     /**
      * Guard type for route enter
      */
@@ -3139,13 +3522,13 @@ export const routerModuleTypes = `declare module "@sigx/router" {
     export declare const RouterView: ComponentFactory<RouterViewProps, void, {}>;
     export type LinkProps = Define.Prop<"to", RouteLocationRaw, true> & Define.Prop<"replace", boolean> & Define.Prop<"activeClass", string> & Define.Prop<"exactActiveClass", string> & Define.Prop<"ariaCurrentValue", "page" | "step" | "location" | "date" | "time" | "true" | "false"> & Define.Event<"click", MouseEvent> & Define.Slot<"default">;
     export declare const Link: import("sigx").ComponentFactory<LinkProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     /**
      * Alias for Link component
      */
     export declare const RouterLink: import("sigx").ComponentFactory<LinkProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     /**
      * Router plugin options
@@ -3208,7 +3591,7 @@ export const routerModuleTypes = `declare module "@sigx/router" {
 
 /** @sigx/store module types */
 export const storeModuleTypes = `declare module "@sigx/store" {
-    import { InstanceLifetimes, SetupFactoryContext, Subscription, Topic, defineFactory, toSubscriber } from '@sigx/runtime-core';
+    import { SetupFactoryContext, Subscription, Topic, defineFactory, toSubscriber } from '@sigx/runtime-core';
 
     export type MutateFn<T> = (value: T | ((prev: T) => T)) => void;
     export type StoreEvents<TState extends object, TEvents extends Record<string, Topic<any>> = {}> = {

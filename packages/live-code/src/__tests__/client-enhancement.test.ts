@@ -267,6 +267,26 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
         expect(String(runCodeSpy.mock.calls[1][1])).toBe(newId);
     });
 
+    it('retries a block that was not ready (no container) on a later scan', async () => {
+        const block = makeBlock('LATER');
+        // Markup not ready yet: the run container is missing.
+        block.querySelector('.code-window-preview-container')!.remove();
+        document.body.appendChild(block);
+        await flush();
+        expect(runCodeSpy).not.toHaveBeenCalled();
+
+        // Container shows up + a rescan is triggered (attr change) → it runs now.
+        const c = document.createElement('div');
+        c.className = 'code-window-preview-container';
+        c.id = 'sigx-preview-late';
+        block.querySelector('.code-window-preview-pane')!.appendChild(c);
+        block.setAttribute('data-live-code', btoa('LATER'));
+        await flush();
+
+        expect(runCodeSpy).toHaveBeenCalledTimes(1);
+        expect(runCodeSpy.mock.calls.at(-1)?.[0]).toBe('LATER');
+    });
+
     it('a superseded in-flight run does not clobber the newer run', async () => {
         // First run hangs so a second run can supersede it before it resolves.
         let resolveFirst: (v: unknown) => void = () => {};

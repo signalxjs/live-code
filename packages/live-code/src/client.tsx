@@ -191,12 +191,26 @@ function teardownPreview(block: HTMLElement) {
     activePreviews.delete(block);
 }
 
-/** Run a `[data-live-preview]` block's code into its preview container. */
-function runPreview(block: HTMLElement) {
+/**
+ * Run a `[data-live-preview]` block's code into its preview container. Returns
+ * whether a run was actually started — `false` when the markup isn't ready or the
+ * payload won't decode, so the caller can leave the block un-marked and retry it
+ * on a later scan instead of stranding it "observed but never run".
+ */
+function runPreview(block: HTMLElement): boolean {
     const container = block.querySelector<HTMLElement>('.code-window-preview-container');
     const codeBase64 = blockCode(block);
-    if (!container || !container.id || !codeBase64) return;
+    if (!container || !container.id || !codeBase64) return false;
     const containerId = container.id;
+
+    // Decode up front — it can throw on a malformed payload — so we bail before
+    // subscribing / tracking and never leak a console subscription on a bad block.
+    let code: string;
+    try {
+        code = decodeBase64(codeBase64);
+    } catch {
+        return false;
+    }
 
     // A reused block (SPA nav) may already have a running preview — replace it.
     teardownPreview(block);
@@ -222,7 +236,6 @@ function runPreview(block: HTMLElement) {
     const offConsole = onConsole(containerId, (logs) => renderConsole(block, logs));
     activePreviews.set(block, { containerId, sig: codeBase64, runId, offConsole });
 
-    const code = decodeBase64(codeBase64);
     void (async () => {
         try {
             await ensureRuntimes();
@@ -244,6 +257,8 @@ function runPreview(block: HTMLElement) {
             if (!superseded()) setLoading(false);
         }
     })();
+
+    return true;
 }
 
 // --- Enhancement scan -----------------------------------------------------
@@ -258,8 +273,10 @@ function getPreviewObserver(): IntersectionObserver {
         previewObserver = new IntersectionObserver((entries) => {
             for (const entry of entries) {
                 if (entry.isIntersecting) {
-                    previewObserver!.unobserve(entry.target);
-                    runPreview(entry.target as HTMLElement);
+                    const block = entry.target as HTMLElement;
+                    previewObserver!.unobserve(block);
+                    // Not ready yet → un-mark so a later scan re-observes and retries.
+                    if (!runPreview(block)) observedBlocks.delete(block);
                 }
             }
         }, { rootMargin: '50px', threshold: 0.01 });
@@ -277,7 +294,8 @@ function enhancePreviewBlocks() {
         for (const block of blocks) {
             if (observedBlocks.has(block)) continue;
             observedBlocks.add(block);
-            runPreview(block);
+            // Not ready yet → un-mark so a later scan retries it.
+            if (!runPreview(block)) observedBlocks.delete(block);
         }
         return;
     }
@@ -314,8 +332,9 @@ function resyncPreviews() {
         teardownPreview(block);
         if (block.isConnected && block.matches('[data-live-preview]') && sig) {
             // Same element, new code — re-run directly (it's on screen already and
-            // the observer fired for it once; we keep it marked observed).
-            runPreview(block);
+            // the observer fired for it once). If it isn't ready, un-mark so the
+            // trailing enhance pass re-observes and retries it.
+            if (!runPreview(block)) observedBlocks.delete(block);
         } else if (!block.isConnected) {
             // Detached. Drop it from the observed set (and the observer, if one
             // exists) so it gets re-observed and can re-run if the framework

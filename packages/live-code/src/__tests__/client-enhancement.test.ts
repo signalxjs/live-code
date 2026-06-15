@@ -281,9 +281,9 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
         c.id = 'sigx-preview-late';
         block.querySelector('.code-window-preview-pane')!.appendChild(c);
         block.setAttribute('data-live-code', btoa('LATER'));
-        await flush();
 
-        expect(runCodeSpy).toHaveBeenCalledTimes(1);
+        // Poll rather than race the debounced resync (flaky under slow CI / Node 20).
+        await vi.waitFor(() => expect(runCodeSpy).toHaveBeenCalledTimes(1));
         expect(runCodeSpy.mock.calls.at(-1)?.[0]).toBe('LATER');
     });
 

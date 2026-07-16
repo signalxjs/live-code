@@ -4,7 +4,7 @@
  * Monaco Editor type definitions for SignalX packages.
  * Generated using dts-bundle-generator from actual source files.
  * 
- * Generated: 2026-06-15T21:06:40.327Z
+ * Generated: 2026-07-16T13:10:31.284Z
  * 
  * To regenerate: pnpm run generate:types
  */
@@ -1246,11 +1246,23 @@ export const sigxModuleTypes = `declare module "sigx" {
     	version: number;
     	/** Present iff this dep is a computed's output dep. */
     	computed?: Subscriber;
+    	/**
+    	 * Link of the subscriber currently (re-)running, installed by
+    	 * startTracking. Lets track() reuse the existing link with one
+    	 * identity compare instead of allocating and re-subscribing.
+    	 */
+    	active?: Link;
     }
     /** A subscriber's edge to one Dep, with the version seen at track time. */
     export interface Link {
     	dep: Dep;
+    	/** Owning subscriber — the identity check behind active-link reuse. */
+    	sub: Subscriber;
     	version: number;
+    	/** Re-tracked during the current run; unseen links are swept. */
+    	seen: boolean;
+    	/** Saved dep.active for LIFO restore across nested runs. */
+    	prevActive: Link | undefined;
     }
     export interface Subscriber extends EffectFn {
     	deps: Link[];
@@ -2047,9 +2059,14 @@ export const sigxModuleTypes = `declare module "sigx" {
      * - If provided at app level via \`app.defineProvide()\`, returns that instance
      * - Otherwise falls back to a global singleton created by the factory
      *
+     * Pass a **name string** instead of a factory to declare a *required*
+     * injectable: there is no fallback, and using it without a provider throws a
+     * structured error (SIGX202) naming the injectable. Use this for services
+     * that must be provided per app — e.g. per-request services under SSR.
+     *
      * @example
      * \`\`\`typescript
-     * // Define a service
+     * // Define a service with a zero-config fallback
      * const useApiConfig = defineInjectable(() => ({
      *     baseUrl: 'https://api.example.com'
      * }));
@@ -2057,9 +2074,14 @@ export const sigxModuleTypes = `declare module "sigx" {
      * // Use it in any component - gets nearest provided instance or global singleton
      * const config = useApiConfig();
      * console.log(config.baseUrl);
+     *
+     * // A required service: no fallback, must be provided
+     * const useRouter = defineInjectable<Router>('Router');
+     * app.defineProvide(useRouter, () => createRouter(url));
      * \`\`\`
      */
     export declare function defineInjectable<T>(factory: () => T): InjectableFunction<T>;
+    export declare function defineInjectable<T>(name: string): InjectableFunction<T>;
     /**
      * Provide a new instance of an injectable at the current component level.
      * Child components will receive this instance when calling the injectable function.
@@ -2227,10 +2249,12 @@ export const sigxModuleTypes = `declare module "sigx" {
      */
     export interface AppConfig {
     	/**
-    	 * Global error handler for component errors.
-    	 * Return true to suppress the error from propagating.
+    	 * App-level error handler — the last stop for component errors (setup,
+    	 * render, reactive re-renders), DOM event-handler throws, and unhandled
+    	 * async data errors that no errorScope took. Return true to suppress
+    	 * the error from propagating. Usually set via \`app.onError(fn)\`.
     	 */
-    	errorHandler?: (err: Error, instance: ComponentInstance | null, info: string) => boolean | void;
+    	onError?: (err: Error, instance: ComponentInstance | null, info: string) => boolean | void;
     	/**
     	 * Global warning handler (dev mode).
     	 */
@@ -2420,7 +2444,13 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 * restored before any awaited continuation runs. After an \`await\`,
     	 * re-enter with another \`runWithContext\` call if you need to resolve more
     	 * dependencies. Nested calls are supported; the previous context is
-    	 * restored when \`fn\` returns (or throws).
+    	 * restored when \`fn\` returns (or throws). Dev builds warn (once per app)
+    	 * when the callback returns a Promise or other thenable, since that
+    	 * usually means DI lookups after the first \`await\` silently fell back to
+    	 * realm instances.
+    	 * (Async continuations via AsyncLocalStorage were considered and
+    	 * deferred: browsers have no ALS, so the behavior would silently diverge
+    	 * client-side — revisit when TC39 AsyncContext lands cross-platform.)
     	 *
     	 * @example
     	 * \`\`\`typescript
@@ -2440,6 +2470,21 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 * Register lifecycle hooks to observe all components
     	 */
     	hook(hooks: AppLifecycleHooks): App<TContainer>;
+    	/**
+    	 * Set the app-level error handler (single slot — the last stop after
+    	 * every errorScope declined). Return true from the handler to suppress
+    	 * the error from propagating. For multiple observers, use
+    	 * \`app.hook({ onComponentError })\`.
+    	 *
+    	 * @example
+    	 * \`\`\`ts
+    	 * app.onError((err, instance, info) => {
+    	 *     telemetry.report(err, { component: instance?.name, info });
+    	 *     return true;
+    	 * });
+    	 * \`\`\`
+    	 */
+    	onError(handler: (err: Error, instance: ComponentInstance | null, info: string) => boolean | void): App<TContainer>;
     	/**
     	 * Register a global directive, or retrieve a registered one.
     	 *
@@ -2479,8 +2524,13 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 */
     	unmount(): void;
     	/**
-    	 * Get the app context (for internal use by renderers)
-    	 * @internal
+    	 * The app's context — the stable surface for plugin authors.
+    	 *
+    	 * Inside \`install(app)\`, pass \`app._context\` to seam provide-helpers
+    	 * (\`provideAsyncEngine\`, \`provideSSRSerializerHandlers\`,
+    	 * \`provideHydrateDefaults\`, …) or read/write \`app._context.provides\`
+    	 * directly. The underscore marks this as an advanced surface, not a
+    	 * private one — no cast is needed.
     	 */
     	_context: AppContext;
     	/**
@@ -2494,8 +2544,9 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 */
     	_container: TContainer | null;
     	/**
-    	 * The root component passed to defineApp()
-    	 * @internal
+    	 * The root component passed to defineApp(). Advanced surface for plugins
+    	 * that mount/hydrate the app themselves (e.g. the SSR client plugin) —
+    	 * same contract as \`_context\`.
     	 */
     	_rootComponent: JSXElement;
     }
@@ -2575,32 +2626,25 @@ export const sigxModuleTypes = `declare module "sigx" {
     	__lazy: true;
     };
     /**
-     * Props for the Suspense component
-     */
-    export type SuspenseProps = {
-    	/** Fallback content to show while loading */
-    	fallback?: JSXElement | (() => JSXElement);
-    };
-    /**
      * Create a lazy-loaded component wrapper.
      *
-     * The component will be loaded on first render. Use with \`<Suspense>\` to show
-     * a fallback while loading.
+     * The component loads on first render (or \`preload()\`). Wrap it in
+     * \`<Defer fallback={…}>\` to show a fallback while the chunk loads.
      *
      * @param loader - Function that returns a Promise resolving to the component
      * @returns A component factory that loads the real component on demand
      *
      * @example
      * \`\`\`tsx
-     * import { lazy, Suspense } from 'sigx';
+     * import { lazy, Defer } from 'sigx';
      *
      * // Component will be in a separate chunk
      * const HeavyChart = lazy(() => import('./components/HeavyChart'));
      *
      * // Usage
-     * <Suspense fallback={<Spinner />}>
+     * <Defer fallback={<Spinner />}>
      *     <HeavyChart data={chartData} />
-     * </Suspense>
+     * </Defer>
      *
      * // Preload on hover
      * <button onMouseEnter={() => HeavyChart.preload()}>
@@ -2610,105 +2654,140 @@ export const sigxModuleTypes = `declare module "sigx" {
      */
     export declare function lazy<T extends AnyComponentFactory>(loader: ComponentLoader<T>): LazyComponentFactory<T>;
     /**
-     * Suspense boundary component for handling async loading states.
-     *
-     * Wraps lazy-loaded components and shows a fallback while they load.
-     *
-     * @example
-     * \`\`\`tsx
-     * import { lazy, Suspense } from 'sigx';
-     *
-     * const LazyDashboard = lazy(() => import('./Dashboard'));
-     *
-     * // Basic usage
-     * <Suspense fallback={<div>Loading...</div>}>
-     *     <LazyDashboard />
-     * </Suspense>
-     *
-     * // With spinner component
-     * <Suspense fallback={<Spinner size="large" />}>
-     *     <LazyDashboard />
-     *     <LazyCharts />
-     * </Suspense>
-     * \`\`\`
-     */
-    export declare const Suspense: ComponentFactory<SuspenseProps, void, {}>;
-    /**
      * Check if a component is a lazy-loaded component
      */
     export declare function isLazyComponent(component: any): component is LazyComponentFactory<any>;
+    export type DeferProps = Define.Prop<"fallback", JSXElement | (() => JSXElement)> & Define.Slot<"default">;
+    export declare const Defer: ComponentFactory<DeferProps, void, {
+    	default?: (() => JSXElement | JSXElement[] | null) | undefined;
+    }>;
     /**
-     * useAsync / useStream — THE async-data primitives.
+     * Key canonicalization + dev guards for \`useData\`.
      *
-     * One rule: give it a KEY and it becomes server-transferable.
+     * A key does three jobs at once — reactive trigger, cache/SSR identity, and
+     * fetcher input — so identity must be canonical: tuples serialize to JSON
+     * (\`['user', 7]\` → \`'["user",7]"\`), which also keeps them disjoint from
+     * plain string keys used by other producers in the shared SSR blob (a
+     * canonical tuple always starts with \`[\`).
      *
-     *   useAsync(fn)            → unkeyed: client-only async work
-     *   useAsync(key, fn, opts) → keyed: runs on the server, value serialized
-     *                             under the key, restored on hydration, deduped
-     *                             per key within a request/page
-     *   useStream(key, source)  → progressive text (LLM-token-style): streams
-     *                             on the server, restored on hydration, live on
-     *                             client navigation
-     *
-     * This module provides the default CLIENT semantics. Server renderers
-     * install per-instance providers (\`_useAsync\` / \`_useStream\` on the setup
-     * context) that take over during SSR — same pattern as the \`ssr\` helper.
-     *
-     * Design doc: docs/rfc-use-async.md.
+     * Pure module: no web globals, no blob access (that lives in ./restore.ts).
      */
+    /** All skip values — including '' so \`str && tuple\` getters type cleanly. */
+    export type Falsy = null | undefined | false | "";
+    /** Tuple elements are JSON primitives only — identity is canonical JSON. */
+    export type KeyTuple = readonly (string | number | boolean | null)[];
+    export type KeyValue = string | KeyTuple;
     export interface AsyncFetcherContext {
     	/**
     	 * Pass it straight to fetch():  fetch(url, { signal })
     	 *
-    	 * Unkeyed calls: aborted when the component unmounts or a refresh()
-    	 * supersedes the run. Keyed calls: the fetch may be SHARED by several
-    	 * components (dedupe), so the signal is detached from any single
-    	 * consumer's lifecycle — each consumer independently stops observing
-    	 * the result when it unmounts.
+    	 * Reads: aborted only when this cell is the fetch's sole consumer and
+    	 * the run is superseded (keyed fetches may be SHARED — dedupe).
+    	 * Actions: never aborted (an aborted POST is not an undone POST).
     	 */
     	signal: AbortSignal;
     }
+    /** One fetcher shape everywhere: (trigger's argument, ctx). */
+    export type Fetcher<T, Arg> = (arg: Arg, ctx: AsyncFetcherContext) => Promise<T>;
+    export type AsyncStateName = "idle" | "pending" | "ready" | "refreshing" | "errored";
+    export interface MatchArms<T, R> {
+    	/** Conditional fetch not started ("Type to search…"). Defaults to \`pending\`. */
+    	idle?: () => R;
+    	/** Nothing to show yet. Omitted ⇒ renders nothing while pending. */
+    	pending?: () => R;
+    	/**
+    	 * Fetch failed. \`stale\` is the last-good value (survives internally even
+    	 * though top-level \`value\` is nulled) — "keep content + toast" needs no
+    	 * extra state. Omitted ⇒ null + bubble to errorScope / app onError.
+    	 */
+    	error?: (e: Error, retry: () => void, stale: T | null) => R;
+    	/** The happy path — the only type-safe route to a non-null T. */
+    	ready: (v: T) => R;
+    }
+    /** Reactive — reads inside a render fn subscribe like any signal. */
+    export interface AsyncState<T> {
+    	readonly state: AsyncStateName;
+    	/** SWR last-good; kept across same-key refresh(), CLEARED on key change. */
+    	readonly value: T | null;
+    	readonly error: Error | null;
+    	/** state === 'pending' ONLY — "nothing to show yet". Refresh indicators read state === 'refreshing'. */
+    	readonly loading: boolean;
+    	match<R>(arms: MatchArms<T, R>): R | undefined;
+    	/** Re-run in place. NEVER rejects — failures land on \`.error\`. */
+    	refresh(): Promise<void>;
+    }
+    /**
+     * OPEN interface — contains only options core actually reads. A pack
+     * augments it (\`declare module …\`) so its options exist in the editor
+     * exactly when the pack is installed; core passes the whole bag through the
+     * provider seam untouched, and the default engine dev-warns on options no
+     * installed plugin handles.
+     */
     export interface AsyncOptions {
     	/**
-    	 * Throw fetch errors when \`.error\` is read during render instead of
-    	 * exposing them — routes to the nearest error boundary / component
-    	 * error fallback. Default: false.
-    	 */
-    	throwOnError?: boolean;
-    	/**
-    	 * (Keyed form.) Run the fetcher on the server. Default: true.
-    	 * \`server: false\` renders the loading branch during SSR and fetches on
-    	 * the client after hydration.
+    	 * Run the fetcher on the server. Default: true. \`server: false\` makes the
+    	 * read client-only (SSR renders the pending arm; the client fetches after
+    	 * hydration) — it keeps its key for dedupe and future cache coverage.
     	 */
     	server?: boolean;
     }
-    /**
-     * Reactive async state. Reading \`value\` / \`loading\` / \`error\` inside a
-     * render function subscribes it — the component re-renders on change.
-     */
-    export interface AsyncState<T> {
-    	/**
-    	 * The last successfully resolved data. Null until the first success.
-    	 * KEPT while a refresh() is in flight (stale-while-revalidate — check
-    	 * \`loading\` to show a revalidation indicator without dropping content).
-    	 * Cleared when a fetch fails: \`value\` and \`error\` are mutually
-    	 * exclusive, so success and error branches never render together.
-    	 */
-    	readonly value: T | null;
-    	/** True while a fetcher is in flight (including refreshes). */
-    	readonly loading: boolean;
-    	/** The fetch error, or null. While set, \`value\` is null. */
-    	readonly error: Error | null;
-    	/** Re-run the fetcher (client; no-op during SSR). Aborts an in-flight run. */
-    	refresh(): Promise<void>;
+    /** Static key: runs on the server, serialized under \`key\`, restored on hydration. */
+    export declare function useData<T>(key: string, fetcher: Fetcher<T, string>, opts?: AsyncOptions): AsyncState<T>;
+    /** Reactive key: string or tuple; a falsy result skips the fetch (state 'idle'). */
+    export declare function useData<T, const K extends KeyValue>(key: () => K | Falsy, fetcher: Fetcher<T, K>, opts?: AsyncOptions): AsyncState<T>;
+    /** A superseded run resolves { ok: false, error: SupersededError } and never writes \`.error\`. */
+    export declare class SupersededError extends Error {
+    	readonly name = "SupersededError";
     }
-    /** Unkeyed: client-only async work. The fetcher never runs on the server. */
-    export declare function useAsync<T>(fetcher: (ctx: AsyncFetcherContext) => Promise<T>, options?: AsyncOptions): AsyncState<T>;
-    /** Keyed: runs on the server, serialized under \`key\`, restored on hydration. */
-    export declare function useAsync<T>(key: string, fetcher: (ctx: AsyncFetcherContext) => Promise<T>, options?: AsyncOptions): AsyncState<T>;
+    export type RunResult<T> = {
+    	ok: true;
+    	value: T;
+    } | {
+    	ok: false;
+    	error: Error;
+    };
+    /** OPEN interface — deliberately empty in core; packs augment it. */
+    export interface ActionOptions {
+    }
+    export interface AsyncAction<T, In> {
+    	readonly state: "idle" | "pending" | "ready" | "errored";
+    	/** Last successful result (a search box renders from this). */
+    	readonly value: T | null;
+    	readonly error: Error | null;
+    	/** state === 'pending' — the blessed double-submit guard: disabled={a.loading}. */
+    	readonly loading: boolean;
+    	match<R>(arms: MatchArms<T, R>): R | undefined;
+    	/**
+    	 * Trigger. Never rejects; in-flight runs are never aborted.
+    	 * \`In = void\` ⇒ callable as \`run()\` (TS permits omitting a void-typed
+    	 * parameter).
+    	 */
+    	run(input: In): Promise<RunResult<T>>;
+    	/**
+    	 * Back to 'idle'; clears value/error (dismiss a success message, reuse a
+    	 * form). Discards observation of an in-flight run (its promise resolves
+    	 * SupersededError); never aborts the request.
+    	 */
+    	reset(): void;
+    }
+    export declare function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions): AsyncAction<T, In>;
+    export interface AllState<T, E> extends AsyncState<T> {
+    	/** Collect-all counterpart to first-error-wins \`.error\`. */
+    	readonly errors: E;
+    }
+    export type ValuesOf<S> = {
+    	[K in keyof S]: S[K] extends AsyncState<infer V> ? V : never;
+    };
+    export type ErrorsOf<S> = {
+    	[K in keyof S]: Error | null;
+    };
+    /** Object form (primary): \`all({ user, posts })\` — named value/errors records. */
+    export declare function all<S extends Record<string, AsyncState<unknown>>>(sources: S): AllState<ValuesOf<S>, ErrorsOf<S>>;
+    /** Rest-tuple form for quick cases: \`all(user, posts)\` — positional tuples. */
+    export declare function all<S extends readonly AsyncState<unknown>[]>(...sources: S): AllState<ValuesOf<S>, ErrorsOf<S>>;
     /**
-     * Progressive text (LLM-token-style). Returns a string signal that
-     * accumulates the source's chunks.
+     * useStream — progressive text (LLM-token-style). Returns a string signal
+     * that accumulates the source's chunks.
      *
      * - Server, streaming: tokens append into the page as they arrive; the
      *   final text swaps in and is serialized under \`key\`.
@@ -2716,24 +2795,53 @@ export const sigxModuleTypes = `declare module "sigx" {
      * - Client, hydrating: final text restored from \`key\` — the source is NOT
      *   re-run (no duplicate LLM calls).
      * - Client, navigation: runs live; the signal updates per chunk.
+     *
+     * This module provides the default CLIENT semantics. Server renderers
+     * install a per-instance provider (\`_useStream\` on the setup context) that
+     * takes over during SSR.
      */
     export declare function useStream(key: string, source: () => AsyncIterable<string>): {
     	readonly value: string;
     };
     /**
-     * Props for the ErrorBoundary component
-     */
-    export type ErrorBoundaryProps = Define.Prop<"fallback", JSXElement | ((error: Error, retry: () => void) => JSXElement)> & Define.Slot<"default">;
-    /**
-     * ErrorBoundary component.
+     * Component type checking utilities
      *
-     * Wraps children and catches errors thrown during rendering.
-     * When an error occurs, displays the \`fallback\` UI.
-     * Provides a \`retry\` function to reset and re-render children.
+     * Separated to avoid circular dependencies between jsx-runtime and renderer.
      */
-    export declare const ErrorBoundary: ComponentFactory<ErrorBoundaryProps, void, {
-    	default?: (() => JSXElement | JSXElement[] | null) | undefined;
-    }>;
+    /**
+     * Minimal interface for component detection.
+     * Full ComponentFactory type is generic and complex, so we use this minimal
+     * interface for the type guard.
+     */
+    export interface ComponentLike {
+    	__setup: Function;
+    	__name?: string;
+    }
+    /**
+     * Check if a value is a SignalX component (has __setup).
+     *
+     * SignalX components are created with component() and have a __setup
+     * property containing the setup function.
+     *
+     * @example
+     * \`\`\`ts
+     * const MyComponent = component((ctx) => () => <div/>);
+     * isComponent(MyComponent); // true
+     * isComponent(() => <div/>); // false (plain function component)
+     * isComponent('div'); // false
+     * \`\`\`
+     */
+    export declare function isComponent(type: unknown): type is ComponentLike;
+    export interface ErrorScopeOptions {
+    	/** Rendered in place of the subtree while errored. Omitted ⇒ renders nothing. */
+    	fallback?: (error: Error, retry: () => void) => JSXElement;
+    	/** Observer — called before the fallback renders. Its own throws are swallowed. */
+    	onError?: (error: Error, instance: ComponentInstance | null, info: string) => void;
+    }
+    /**
+     * Scope the calling component's subtree. Setup-only.
+     */
+    export declare function errorScope(options: ErrorScopeOptions): void;
     /**
      * Structured error system for SignalX runtime.
      *
@@ -2771,20 +2879,30 @@ export const sigxModuleTypes = `declare module "sigx" {
      * - SIGX001–SIGX099: App lifecycle
      * - SIGX100–SIGX199: Rendering / mounting
      * - SIGX200–SIGX299: Dependency injection
+     * - SIGX300–SIGX399: Hooks / async
+     * - SIGX400–SIGX499: Messaging
      */
     export declare const SigxErrorCode: {
     	readonly NO_MOUNT_FUNCTION: "SIGX001";
     	readonly RENDER_TARGET_NOT_FOUND: "SIGX100";
     	readonly MOUNT_TARGET_NOT_FOUND: "SIGX101";
     	readonly ASYNC_SETUP_CLIENT: "SIGX102";
+    	readonly ERROR_SCOPE_OUTSIDE_SETUP: "SIGX103";
     	readonly PROVIDE_OUTSIDE_SETUP: "SIGX200";
     	readonly PROVIDE_INVALID_INJECTABLE: "SIGX201";
+    	readonly REQUIRED_INJECTABLE_NOT_PROVIDED: "SIGX202";
+    	readonly FACTORY_INVALID_RETURN: "SIGX203";
+    	readonly HOOK_OUTSIDE_SETUP: "SIGX300";
+    	readonly TOPIC_DESTROYED: "SIGX400";
+    	readonly TOPIC_GROUP_DESTROYED: "SIGX401";
     };
     export declare function noMountFunctionError(): SigxError;
     export declare function renderTargetNotFoundError(selector: string): SigxError;
     export declare function mountTargetNotFoundError(selector: string): SigxError;
     export declare function asyncSetupClientError(componentName: string): SigxError;
+    export declare function errorScopeOutsideSetupError(): SigxError;
     export declare function provideOutsideSetupError(): SigxError;
+    export declare function requiredInjectableNotProvidedError(name: string): SigxError;
     export declare function provideInvalidInjectableError(): SigxError;
     /** Check whether a value is thenable (Promise-like). */
     export declare function isPromise(value: any): boolean;
@@ -2918,35 +3036,6 @@ export const sigxModuleTypes = `declare module "sigx" {
     ], InferReturnSetup & {
     	dispose: () => void;
     }>;
-    /**
-     * Component type checking utilities
-     *
-     * Separated to avoid circular dependencies between jsx-runtime and renderer.
-     */
-    /**
-     * Minimal interface for component detection.
-     * Full ComponentFactory type is generic and complex, so we use this minimal
-     * interface for the type guard.
-     */
-    export interface ComponentLike {
-    	__setup: Function;
-    	__name?: string;
-    }
-    /**
-     * Check if a value is a SignalX component (has __setup).
-     *
-     * SignalX components are created with component() and have a __setup
-     * property containing the setup function.
-     *
-     * @example
-     * \`\`\`ts
-     * const MyComponent = component((ctx) => () => <div/>);
-     * isComponent(MyComponent); // true
-     * isComponent(() => <div/>); // false (plain function component)
-     * isComponent('div'); // false
-     * \`\`\`
-     */
-    export declare function isComponent(type: unknown): type is ComponentLike;
     /**
      * Render a SignalX element to a DOM container.
      * Supports both Element references and CSS selectors.
@@ -3087,6 +3176,25 @@ export const sigxModuleTypes = `declare module "sigx" {
     	innerHTML?: string;
     	[key: string]: string | boolean | undefined;
     }
+    export interface HeadStyle {
+    	/**
+    	 * Raw CSS — the explicit opt-in for unescaped content (closing-tag
+    	 * sequences are still neutralized server-side).
+    	 */
+    	innerHTML: string;
+    	[key: string]: string | undefined;
+    }
+    export interface HeadNoscript {
+    	/**
+    	 * Raw fallback markup — the explicit opt-in for unescaped content
+    	 * (closing-tag sequences are still neutralized server-side).
+    	 */
+    	innerHTML: string;
+    }
+    export interface HeadBase {
+    	href?: string;
+    	target?: string;
+    }
     export interface HeadConfig {
     	/** Page title */
     	title?: string;
@@ -3098,6 +3206,12 @@ export const sigxModuleTypes = `declare module "sigx" {
     	link?: HeadLink[];
     	/** Script tags */
     	script?: HeadScript[];
+    	/** Style tags (raw CSS via the explicit innerHTML opt-in) */
+    	style?: HeadStyle[];
+    	/** Noscript fallback (raw markup via the explicit innerHTML opt-in) */
+    	noscript?: HeadNoscript[];
+    	/** Document base URL/target — one per document, last config wins */
+    	base?: HeadBase;
     	/** HTML language attribute */
     	htmlAttrs?: {
     		lang?: string;
@@ -3109,6 +3223,13 @@ export const sigxModuleTypes = `declare module "sigx" {
     		class?: string;
     		[key: string]: string | undefined;
     	};
+    	/**
+    	 * Server-render ordering control: collected configs render into the
+    	 * document <head> in ascending priority (default 0), ties in call
+    	 * order — lower = earlier. Client-side application (SPA navigations)
+    	 * is per-call and does not reorder the live head.
+    	 */
+    	priority?: number;
     }
     /**
      * Manage \`<head>\` elements from within a component.
@@ -3591,73 +3712,140 @@ export const routerModuleTypes = `declare module "@sigx/router" {
 
 /** @sigx/store module types */
 export const storeModuleTypes = `declare module "@sigx/store" {
-    import { SetupFactoryContext, Subscription, Topic, defineFactory, toSubscriber } from '@sigx/runtime-core';
+    import { Computed } from '@sigx/reactivity';
+    import { Lifetime, SetupFactoryContext, Subscription, Topic } from '@sigx/runtime-core';
 
-    export type MutateFn<T> = (value: T | ((prev: T) => T)) => void;
-    export type StoreEvents<TState extends object, TEvents extends Record<string, Topic<any>> = {}> = {
-    	[K in keyof TState as \`onMutated\${Capitalize<string & K>}\`]: ReturnType<typeof toSubscriber<TState[K]>>;
-    } & TEvents;
-    export type MapActionOnDispatching<T extends Function> = T extends (...args: infer U) => any ? (...args: U) => void : never;
-    export type MapActionOnDispatched<T extends Function> = T extends (...args: infer U) => Promise<infer Y> | infer Y ? (result: Y, ...args: U) => void : never;
-    export type MapActionOnFailure<T extends Function> = T extends (...args: infer U) => any ? (failureReason: any, ...args: U) => void : never;
-    export type StoreReturnDefineAction<TAction extends {
-    	[key: string]: any;
-    }> = {
+    declare const KeySignalBrand: unique symbol;
+    declare const StoreShape: unique symbol;
+    /**
+     * A signal-shaped, spreadable view over one state key. Spread the \`signals\`
+     * from defineState into your setup return to make those keys public state.
+     */
+    export type KeySignal<T> = {
+    	value: T;
+    	readonly [KeySignalBrand]: true;
+    };
+    export type StateKeyEvent<T> = {
+    	subscribe(fn: (value: T, prev: T | undefined) => void): Subscription;
+    };
+    export type Patch<TState extends object> = {
+    	(partial: Partial<TState>): void;
+    	(mutator: (state: TState) => void): void;
+    };
+    /**
+     * A wrapped store action: callable with the exact original signature, plus a
+     * reactive in-flight flag and per-action lifecycle event subscribers.
+     */
+    export type StoreAction<F extends (...args: any[]) => any> = F & {
+    	/** Reactive: true while any invocation of this action is in flight. */
+    	readonly pending: boolean;
     	onDispatching: {
-    		[k in keyof TAction]: {
-    			subscribe(fn: MapActionOnDispatching<TAction[k]>): Subscription;
-    		};
+    		subscribe(fn: (...args: Parameters<F>) => void): Subscription;
     	};
     	onDispatched: {
-    		[k in keyof TAction]: {
-    			subscribe(fn: MapActionOnDispatched<TAction[k]>): Subscription;
-    		};
+    		subscribe(fn: (result: Awaited<ReturnType<F>>, ...args: Parameters<F>) => void): Subscription;
     	};
     	onFailure: {
-    		[k in keyof TAction]: {
-    			subscribe(fn: MapActionOnFailure<TAction[k]>): Subscription;
-    		};
+    		subscribe(fn: (error: unknown, ...args: Parameters<F>) => void): Subscription;
     	};
-    } & TAction;
+    };
+    export type StoreActions<T extends Record<string, (...args: any[]) => any>> = {
+    	[K in keyof T]: StoreAction<T[K]>;
+    };
     export interface SetupStoreContext extends SetupFactoryContext {
-    	defineState<TState extends object, TEvents extends Record<string, Topic<any>> = Record<string, Topic<any>>>(state: TState): {
+    	/** The logical store name passed to defineStore (e.g. \`'todos'\`). */
+    	readonly storeName: string;
+    	/** The friendly instance id (e.g. \`'todos#1'\`). */
+    	readonly instanceId: string;
+    	defineState<TState extends object>(state: TState): {
+    		/** The deep reactive proxy — mutate freely inside the setup/actions. */
     		state: TState;
-    		events: StoreEvents<TState, TEvents>;
-    		mutate: {
-    			[K in keyof TState]: MutateFn<TState[K]>;
+    		/** Spreadable per-key signals; the ones you return become public state. */
+    		signals: {
+    			[K in keyof TState]-?: KeySignal<TState[K]>;
     		};
+    		/** Per-key change events (lazy: watchers run only while subscribed). */
+    		events: {
+    			[K in keyof TState]-?: StateKeyEvent<TState[K]>;
+    		};
+    		/** Atomic multi-key update; flushes reactivity once. Errors propagate. */
+    		patch: Patch<TState>;
     	};
-    	defineActions<TActions extends {
-    		[key: string]: any;
-    	}>(actions: TActions): StoreReturnDefineAction<TActions>;
+    	defineActions<TActions extends Record<string, (...args: any[]) => any>>(actions: TActions): StoreActions<TActions>;
+    	/** Typed custom events; namespaced \`\${\$id}.events\`, destroyed with the store. */
+    	defineEvents<EventMap extends Record<string, any>>(): {
+    		[K in keyof EventMap]: Topic<EventMap[K]>;
+    	};
     }
-    export interface IReturnSetupStore<TState, TGetters, TActions extends {
-    	[key: string]: Function;
-    }, TEvents> {
-    	state?: TState;
-    	get?: TGetters;
-    	actions?: StoreReturnDefineAction<TActions>;
-    	events?: TEvents;
-    	name?: string;
-    }
-    export declare function defineStore<TState extends object, TGetters extends object, TActions extends {
-    	[key: string]: any;
-    }, TEvents extends Record<string, ReturnType<typeof toSubscriber<any>>>, InferReturnSetup extends IReturnSetupStore<TState, TGetters, TActions, TEvents>>(name: string, setup: (ctx: SetupStoreContext) => InferReturnSetup, lifetime?: InstanceLifetimes): ReturnType<typeof defineFactory<InferReturnSetup>>;
-    export declare function defineStore<TState extends object, TGetters extends object, TActions extends {
-    	[key: string]: any;
-    }, TEvents extends Record<string, ReturnType<typeof toSubscriber<any>>>, InferReturnSetup extends IReturnSetupStore<TState, TGetters, TActions, TEvents>, T1>(name: string, setup: (ctx: SetupStoreContext, param1: T1) => InferReturnSetup, lifetime?: InstanceLifetimes): ReturnType<typeof defineFactory<InferReturnSetup, T1>>;
-    export declare function defineStore<TState extends object, TGetters extends object, TActions extends {
-    	[key: string]: any;
-    }, TEvents extends Record<string, ReturnType<typeof toSubscriber<any>>>, InferReturnSetup extends IReturnSetupStore<TState, TGetters, TActions, TEvents>, T1, T2>(name: string, setup: (ctx: SetupStoreContext, param1: T1, param2: T2) => InferReturnSetup, lifetime?: InstanceLifetimes): ReturnType<typeof defineFactory<InferReturnSetup, T1, T2>>;
-    export declare function defineStore<TState extends object, TGetters extends object, TActions extends {
-    	[key: string]: any;
-    }, TEvents extends Record<string, ReturnType<typeof toSubscriber<any>>>, InferReturnSetup extends IReturnSetupStore<TState, TGetters, TActions, TEvents>, T1, T2, T3>(name: string, setup: (ctx: SetupStoreContext, param1: T1, param2: T2, param3: T3, lifetime?: InstanceLifetimes) => InferReturnSetup): ReturnType<typeof defineFactory<InferReturnSetup, T1, T2, T3>>;
-    export declare function defineStore<TState extends object, TGetters extends object, TActions extends {
-    	[key: string]: any;
-    }, TEvents extends Record<string, ReturnType<typeof toSubscriber<any>>>, InferReturnSetup extends IReturnSetupStore<TState, TGetters, TActions, TEvents>, T1, T2, T3, T4>(name: string, setup: (ctx: SetupStoreContext, param1: T1, param2: T2, param3: T3, param4: T4, lifetime?: InstanceLifetimes) => InferReturnSetup): ReturnType<typeof defineFactory<InferReturnSetup, T1, T2, T3, T4>>;
-    export declare function defineStore<TState extends object, TGetters extends object, TActions extends {
-    	[key: string]: any;
-    }, TEvents extends Record<string, ReturnType<typeof toSubscriber<any>>>, InferReturnSetup extends IReturnSetupStore<TState, TGetters, TActions, TEvents>, T1, T2, T3, T4, T5>(name: string, setup: (ctx: SetupStoreContext, param1: T1, param2: T2, param3: T3, param4: T4, param5: T5) => InferReturnSetup, lifetime?: InstanceLifetimes): ReturnType<typeof defineFactory<InferReturnSetup, T1, T2, T3, T4, T5>>;
+    /** The keys of the setup return that are key signals — the store's public state. */
+    export type PublicState<TReturn> = {
+    	[K in keyof TReturn as TReturn[K] extends KeySignal<any> ? K : never]: TReturn[K] extends KeySignal<infer V> ? V : never;
+    };
+    export type StoreMeta<TReturn extends object> = {
+    	/** Phantom (never set at runtime) — carries the setup return type for inference. */
+    	readonly [StoreShape]?: TReturn;
+    	/** Friendly instance id, e.g. \`'todos#1'\`. */
+    	readonly \$id: string;
+    	/** Atomic update across the store's public state keys. */
+    	\$patch: Patch<PublicState<TReturn>>;
+    	/** Per-key change events for the public state keys. */
+    	\$events: {
+    		[K in keyof PublicState<TReturn>]: StateKeyEvent<PublicState<TReturn>[K]>;
+    	};
+    	\$dispose(): void;
+    };
+    /**
+     * The flat store surface: key signals read/write as plain values, computeds
+     * read as plain values (read-only), actions/functions/objects pass through,
+     * \`\$\`-meta on the side.
+     */
+    export type UnwrapStore<TReturn extends object> = {
+    	[K in keyof TReturn as TReturn[K] extends KeySignal<any> ? K : never]: TReturn[K] extends KeySignal<infer V> ? V : never;
+    } & {
+    	readonly [K in keyof TReturn as TReturn[K] extends KeySignal<any> ? never : TReturn[K] extends Computed<any> ? K : never]: TReturn[K] extends Computed<infer V> ? V : never;
+    } & {
+    	[K in keyof TReturn as TReturn[K] extends KeySignal<any> | Computed<any> ? never : K]: TReturn[K];
+    } & StoreMeta<TReturn>;
+    export type StorePluginContext = {
+    	/** The logical store name passed to defineStore. */
+    	name: string;
+    	/** The instance id, e.g. \`'todos#1'\`. */
+    	instanceId: string;
+    	/** The raw setup return (any shape — duck-type as needed). */
+    	instance: object;
+    	/** Tie plugin resources to the store instance's lifetime. */
+    	onDeactivated(fn: () => void): void;
+    };
+    /**
+     * Register a plugin that runs for every store instance, synchronously after
+     * its setup returns. Plugins run in registration order; a throwing plugin is
+     * isolated and cannot break store creation. Returns a Subscription whose
+     * unsubscribe stops future invocations.
+     */
+    export declare function onStoreCreated(plugin: (ctx: StorePluginContext) => void): Subscription;
+    /**
+     * Tuple-typed setup parameters: any arity is preserved with full inference
+     * (no fixed overload ceiling).
+     */
+    export declare function defineStore<TReturn extends object, TArgs extends unknown[] = [
+    ]>(name: string, setup: (ctx: SetupStoreContext, ...args: TArgs) => TReturn, lifetime?: Lifetime): (...args: TArgs) => UnwrapStore<TReturn>;
+    /**
+     * Destructuring-safe views of a store: key signals for state keys, read-only
+     * signal views for computeds. Functions and \`\$\`-meta are skipped.
+     *
+     * @example
+     * \`\`\`ts
+     * const { todos, remaining } = storeToSignals(store);
+     * todos.value.push(item);   // still reactive
+     * \`\`\`
+     */
+    export declare function storeToSignals<TReturn extends object>(store: {
+    	readonly [StoreShape]?: TReturn;
+    }): {
+    	[K in keyof TReturn as TReturn[K] extends KeySignal<any> | Computed<any> ? K : never]: TReturn[K] extends KeySignal<infer V> ? KeySignal<V> : TReturn[K] extends Computed<infer V> ? {
+    		readonly value: V;
+    	} : never;
+    };
 
 
 }`;
@@ -3715,7 +3903,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const ThemeProvider: import("sigx").ComponentFactory<ThemeProviderProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type ThemeSelectorProps = Define.Prop<"themes", (DaisyTheme | string)[], false> & Define.Prop<"class", string, false>;
     /**
@@ -3891,9 +4079,9 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	"onUpdate:modelValue"?: ((detail: ThemeConfigData) => void) | undefined;
     } & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	} & {
-    		preview: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		preview?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {
     	model?: import("sigx").Model<ThemeConfigData> | import("sigx").ModelBinding<ThemeConfigData> | (() => ThemeConfigData) | undefined;
@@ -3911,12 +4099,12 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		showExport?: boolean | undefined;
     		showPreview?: boolean | undefined;
     	}, ThemeConfiguratorProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	} & {
-    		preview: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		preview?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		model?: import("sigx").Model<ThemeConfigData> | undefined;
     		baseTheme?: string | undefined;
@@ -3930,9 +4118,9 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__events: ThemeConfiguratorProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	} & {
-    		preview: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		preview?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Colors: import("sigx").ComponentFactory<SidebarColorsProps, void, {}>;
@@ -3971,7 +4159,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Button: import("sigx").ComponentFactory<ButtonProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type ButtonGroupProps = Define.Prop<"vertical", boolean, false> & Define.Prop<"horizontal", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
     /**
@@ -3987,7 +4175,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const ButtonGroup: import("sigx").ComponentFactory<ButtonGroupProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type InputSize = "xs" | "sm" | "md" | "lg";
     export type InputVariant = "bordered" | "ghost";
@@ -4043,7 +4231,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Select: import("sigx").ComponentFactory<SelectProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type FormFieldProps = Define.Prop<"label", string, false> & Define.Prop<"error", string, false> & Define.Prop<"hint", string, false> & Define.Prop<"required", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
     /**
@@ -4058,7 +4246,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const FormField: import("sigx").ComponentFactory<FormFieldProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type ToggleSize = "xs" | "sm" | "md" | "lg";
     export type ToggleColor = "primary" | "secondary" | "accent" | "info" | "success" | "warning" | "error";
@@ -4121,7 +4309,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	"onUpdate:modelValue"?: ((detail: string) => void) | undefined;
     } & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {
     	model?: import("sigx").Model<string> | import("sigx").ModelBinding<string> | (() => string) | undefined;
@@ -4139,10 +4327,10 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		name?: string | undefined;
     		size?: RadioSize | undefined;
     	}, RadioGroupProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		model?: import("sigx").Model<string> | undefined;
     		change?: import("sigx").EventDefinition<string> | undefined;
@@ -4156,7 +4344,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__events: RadioGroupProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Item: import("sigx").ComponentFactory<RadioItemProps, void, {}>;
@@ -4181,7 +4369,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	class?: string | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
@@ -4190,26 +4378,26 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__setup: import("sigx").SetupFn<{
     		class?: string | undefined;
     	}, FieldsetProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		class?: string | undefined;
     	};
     	__events: FieldsetProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Legend: import("sigx").ComponentFactory<FieldsetLegendProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type LabelProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
     export declare const Label: import("sigx").ComponentFactory<LabelProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type ContainerSize = "sm" | "md" | "lg" | "xl" | "2xl" | "full";
     export type ContainerProps = Define.Prop<"size", ContainerSize, false> & Define.Prop<"center", boolean, false> & Define.Prop<"padding", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
@@ -4224,10 +4412,133 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Container: import("sigx").ComponentFactory<ContainerProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
+    }>;
+    /** Spacing scale values (matches Tailwind spacing) */
+    export type SpacingValue = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "8" | "10" | "12";
+    /** Directional spacing object */
+    export type SpacingObject = {
+    	/** All sides */
+    	all?: SpacingValue;
+    	/** Horizontal (left + right) */
+    	x?: SpacingValue;
+    	/** Vertical (top + bottom) */
+    	y?: SpacingValue;
+    	/** Top only */
+    	top?: SpacingValue;
+    	/** Right only */
+    	right?: SpacingValue;
+    	/** Bottom only */
+    	bottom?: SpacingValue;
+    	/** Left only */
+    	left?: SpacingValue;
+    };
+    /** Flexible spacing - can be a single value or directional object */
+    type Spacing = SpacingValue | SpacingObject;
+    /**
+     * Border radius values. \`box\` / \`field\` / \`selector\` are the theme-derived
+     * daisyUI radii (\`--radius-box\` for cards/modals/panels, \`--radius-field\` for
+     * buttons/inputs/tabs/menu-items, \`--radius-selector\` for checkboxes/toggles/
+     * badges) — they track the active theme. The \`sm\`..\`3xl\`/\`full\` scale is fixed.
+     */
+    export type RadiusValue = "none" | "sm" | "md" | "lg" | "xl" | "2xl" | "3xl" | "full" | "box" | "field" | "selector";
+    /** Predefined Tailwind size values */
+    export type TailwindSizeValue = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "8" | "10" | "12" | "16" | "20" | "24" | "32" | "40" | "48" | "56" | "64" | "72" | "80" | "96" | "auto" | "full" | "screen" | "min" | "max" | "fit" | "1/2" | "1/3" | "2/3" | "1/4" | "2/4" | "3/4" | "1/5" | "2/5" | "3/5" | "4/5" | "1/6" | "5/6";
+    /**
+     * Explicit CSS size values that carry a unit, plus \`calc()\`/\`var()\`.
+     * Requiring a unit here is what makes a bare non-preset number (e.g. \`"560"\`)
+     * a type error — guiding callers to a preset or a unitful value.
+     */
+    export type CssSize = \`\${number}px\` | \`\${number}rem\` | \`\${number}em\` | \`\${number}ch\` | \`\${number}%\` | \`\${number}vh\` | \`\${number}vw\` | \`\${number}vmin\` | \`\${number}vmax\` | \`\${number}dvh\` | \`\${number}dvw\` | \`\${number}svh\` | \`\${number}lvh\` | \`calc(\${string})\` | \`var(\${string})\`;
+    /**
+     * Size value — a Tailwind step preset (autocompleted) or an explicit CSS value.
+     *
+     * Presets follow Tailwind's spacing scale where the number is the ×0.25rem step,
+     * NOT pixels: \`width="56"\` → \`w-56\` = 14rem (224px). For an absolute size, pass a
+     * unit: \`width="560px"\`, \`width="50%"\`, \`width="calc(100% - 2rem)"\`. A bare
+     * non-preset number like \`"560"\` is rejected by the type — add a unit or use a
+     * preset. For anything exotic, use the \`class\` escape hatch.
+     *
+     * @example
+     * width="48"                 // w-48 (12rem) — Tailwind step
+     * width="full"               // w-full (100%)
+     * width="1/2"                // w-1/2 (50%)
+     * width="560px"              // style="width: 560px"
+     * width="70%"                // style="width: 70%"
+     * width="calc(100% - 2rem)"  // style="width: calc(100% - 2rem)"
+     */
+    export type SizeValue = TailwindSizeValue | CssSize;
+    /** DaisyUI semantic background colors */
+    export type BackgroundColor = "base-100" | "base-200" | "base-300" | "primary" | "secondary" | "accent" | "neutral" | "info" | "success" | "warning" | "error";
+    /**
+     * Container styling props (theme-aware) to mix into panel/container components
+     * so consumers set chrome via props instead of hand-written utility classes.
+     * Adds \`width\` to \`StyleProps\` and resolves to a className + optional inline
+     * style (width can be a class or, for unitful values, an inline style).
+     */
+    export type BoxStyleProps = Define.Prop<"padding", Spacing, false> & Define.Prop<"margin", Spacing, false> & Define.Prop<"rounded", RadiusValue | boolean, false> & Define.Prop<"background", BackgroundColor, false> & Define.Prop<"width", SizeValue, false> & Define.Prop<"height", SizeValue, false> & Define.Prop<"class", string, false>;
+    export type FlexAlign = "start" | "center" | "end" | "stretch" | "baseline";
+    export type FlexJustify = "start" | "center" | "end" | "between" | "around" | "evenly";
+    export type FlexDirection = "row" | "col" | "row-reverse" | "col-reverse";
+    export type FlexProps = Define.Prop<"direction", FlexDirection, false> & Define.Prop<"gap", Spacing, false> & Define.Prop<"align", FlexAlign, false> & Define.Prop<"justify", FlexJustify, false> & Define.Prop<"wrap", boolean, false> & Define.Prop<"inline", boolean, false> & Define.Prop<"padding", Spacing, false> & Define.Prop<"margin", Spacing, false> & Define.Prop<"width", SizeValue, false> & Define.Prop<"height", SizeValue, false> & Define.Prop<"minWidth", SizeValue, false> & Define.Prop<"minHeight", SizeValue, false> & Define.Prop<"maxWidth", SizeValue, false> & Define.Prop<"maxHeight", SizeValue, false> & Define.Prop<"rounded", RadiusValue | boolean, false> & Define.Prop<"background", BackgroundColor, false> & Define.Prop<"grow", boolean, false> & Define.Prop<"shrink", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
+    /**
+     * Flexible layout component using Tailwind CSS flex utilities.
+     *
+     * @example
+     * \`\`\`tsx
+     * // Simple usage
+     * <Flex direction="row" gap="4" align="center">
+     *   <div>Item 1</div>
+     *   <div>Item 2</div>
+     * </Flex>
+     *
+     * // With styling props
+     * <Flex padding="4" background="base-200" rounded>
+     *   <div>Styled flex</div>
+     * </Flex>
+     *
+     * // With width/height (Tailwind presets or CSS values)
+     * <Flex width="full" height="screen" padding="4">...</Flex>
+     * <Flex width="400px" height="200px">...</Flex>
+     * \`\`\`
+     */
+    export declare const Flex: import("sigx").ComponentFactory<FlexProps, void, {
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
+    }>;
+    export type RowProps = Omit<FlexProps, "direction"> & Define.Prop<"reverse", boolean, false>;
+    /**
+     * Horizontal flex container (row direction).
+     *
+     * @example
+     * \`\`\`tsx
+     * <Row gap="4" align="center" padding="4" background="base-200" rounded>
+     *   <div>Left</div>
+     *   <div>Right</div>
+     * </Row>
+     * \`\`\`
+     */
+    export declare const Row: import("sigx").ComponentFactory<RowProps, void, {
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
+    }>;
+    export type ColProps = Omit<FlexProps, "direction"> & Define.Prop<"reverse", boolean, false>;
+    /**
+     * Vertical flex container (column direction).
+     *
+     * @example
+     * \`\`\`tsx
+     * <Col gap="4" align="center" padding="4" background="base-200" rounded>
+     *   <div>Top</div>
+     *   <div>Bottom</div>
+     * </Col>
+     * \`\`\`
+     */
+    export declare const Col: import("sigx").ComponentFactory<ColProps, void, {
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type CardVariant = "normal" | "compact" | "side" | "bordered" | "image-full";
-    export type CardProps = Define.Prop<"variant", CardVariant, false> & Define.Prop<"shadow", boolean | "sm" | "md" | "lg" | "xl", false> & Define.Prop<"bordered", boolean, false> & Define.Prop<"glass", boolean, false> & Define.Prop<"imageFull", boolean, false> & Define.Prop<"bgColor", string, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
+    export type CardProps = Define.Prop<"variant", CardVariant, false> & Define.Prop<"shadow", boolean | "sm" | "md" | "lg" | "xl", false> & Define.Prop<"bordered", boolean, false> & Define.Prop<"glass", boolean, false> & Define.Prop<"imageFull", boolean, false>
+    /** @deprecated raw bg class — prefer the theme-aware \`background\` prop */
+     & Define.Prop<"bgColor", string, false> & BoxStyleProps & Define.Slot<"default">;
     export type CardBodyProps = Define.Prop<"center", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
     export type CardTitleProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
     export type CardActionsProps = Define.Prop<"justify", "start" | "center" | "end", false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
@@ -4236,62 +4547,80 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * Card compound component with Body, Title, Actions, and Image sub-components.
      */
     export declare const Card: ((props: {
+    	background?: BackgroundColor | undefined;
     	bgColor?: string | undefined;
     	bordered?: boolean | undefined;
     	class?: string | undefined;
     	glass?: boolean | undefined;
+    	height?: SizeValue | undefined;
     	imageFull?: boolean | undefined;
+    	margin?: Spacing | undefined;
+    	padding?: Spacing | undefined;
+    	rounded?: boolean | RadiusValue | undefined;
     	shadow?: "lg" | "md" | "sm" | "xl" | boolean | undefined;
     	variant?: CardVariant | undefined;
+    	width?: SizeValue | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
     	children?: any;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
+    		background?: BackgroundColor | undefined;
     		bgColor?: string | undefined;
     		bordered?: boolean | undefined;
     		class?: string | undefined;
     		glass?: boolean | undefined;
+    		height?: SizeValue | undefined;
     		imageFull?: boolean | undefined;
+    		margin?: Spacing | undefined;
+    		padding?: Spacing | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
     		shadow?: "lg" | "md" | "sm" | "xl" | boolean | undefined;
     		variant?: CardVariant | undefined;
+    		width?: SizeValue | undefined;
     	}, CardProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
+    		background?: BackgroundColor | undefined;
     		bgColor?: string | undefined;
     		bordered?: boolean | undefined;
     		class?: string | undefined;
     		glass?: boolean | undefined;
+    		height?: SizeValue | undefined;
     		imageFull?: boolean | undefined;
+    		margin?: Spacing | undefined;
+    		padding?: Spacing | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
     		shadow?: "lg" | "md" | "sm" | "xl" | boolean | undefined;
     		variant?: CardVariant | undefined;
+    		width?: SizeValue | undefined;
     	};
     	__events: CardProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Body: import("sigx").ComponentFactory<CardBodyProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Title: import("sigx").ComponentFactory<CardTitleProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Actions: import("sigx").ComponentFactory<CardActionsProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Image: import("sigx").ComponentFactory<CardImageProps, void, {}>;
     };
     export type StackDirection = "top" | "bottom" | "start" | "end";
-    export type StackProps = Define.Prop<"direction", StackDirection, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
+    export type StackProps = Define.Prop<"direction", StackDirection, false> & BoxStyleProps & Define.Slot<"default">;
     /**
      * DaisyUI Stack component - visually puts elements on top of each other.
      *
@@ -4331,107 +4660,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Stack: import("sigx").ComponentFactory<StackProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
-    }>;
-    /** Spacing scale values (matches Tailwind spacing) */
-    export type SpacingValue = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "8" | "10" | "12";
-    /** Directional spacing object */
-    export type SpacingObject = {
-    	/** All sides */
-    	all?: SpacingValue;
-    	/** Horizontal (left + right) */
-    	x?: SpacingValue;
-    	/** Vertical (top + bottom) */
-    	y?: SpacingValue;
-    	/** Top only */
-    	top?: SpacingValue;
-    	/** Right only */
-    	right?: SpacingValue;
-    	/** Bottom only */
-    	bottom?: SpacingValue;
-    	/** Left only */
-    	left?: SpacingValue;
-    };
-    /** Flexible spacing - can be a single value or directional object */
-    type Spacing = SpacingValue | SpacingObject;
-    /** Border radius values */
-    export type RadiusValue = "none" | "sm" | "md" | "lg" | "xl" | "2xl" | "3xl" | "full" | "box";
-    /** Predefined Tailwind size values */
-    export type TailwindSizeValue = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "8" | "10" | "12" | "16" | "20" | "24" | "32" | "40" | "48" | "56" | "64" | "72" | "80" | "96" | "auto" | "full" | "screen" | "min" | "max" | "fit" | "1/2" | "1/3" | "2/3" | "1/4" | "2/4" | "3/4" | "1/5" | "2/5" | "3/5" | "4/5" | "1/6" | "5/6";
-    /**
-     * Size value - can be a Tailwind preset or arbitrary CSS value.
-     *
-     * @example
-     * // Tailwind presets
-     * width="48"      // w-48 (12rem)
-     * width="full"    // w-full (100%)
-     * width="1/2"     // w-1/2 (50%)
-     *
-     * // Arbitrary CSS values (applied as inline styles)
-     * width="400px"   // style="width: 400px"
-     * width="70%"     // style="width: 70%"
-     * width="calc(100% - 2rem)"  // style="width: calc(100% - 2rem)"
-     */
-    export type SizeValue = TailwindSizeValue | (string & {});
-    /** DaisyUI semantic background colors */
-    export type BackgroundColor = "base-100" | "base-200" | "base-300" | "primary" | "secondary" | "accent" | "neutral" | "info" | "success" | "warning" | "error";
-    export type FlexAlign = "start" | "center" | "end" | "stretch" | "baseline";
-    export type FlexJustify = "start" | "center" | "end" | "between" | "around" | "evenly";
-    export type FlexDirection = "row" | "col" | "row-reverse" | "col-reverse";
-    export type FlexProps = Define.Prop<"direction", FlexDirection, false> & Define.Prop<"gap", Spacing, false> & Define.Prop<"align", FlexAlign, false> & Define.Prop<"justify", FlexJustify, false> & Define.Prop<"wrap", boolean, false> & Define.Prop<"inline", boolean, false> & Define.Prop<"padding", Spacing, false> & Define.Prop<"margin", Spacing, false> & Define.Prop<"width", SizeValue, false> & Define.Prop<"height", SizeValue, false> & Define.Prop<"minWidth", SizeValue, false> & Define.Prop<"minHeight", SizeValue, false> & Define.Prop<"maxWidth", SizeValue, false> & Define.Prop<"maxHeight", SizeValue, false> & Define.Prop<"rounded", RadiusValue | boolean, false> & Define.Prop<"background", BackgroundColor, false> & Define.Prop<"grow", boolean, false> & Define.Prop<"shrink", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
-    /**
-     * Flexible layout component using Tailwind CSS flex utilities.
-     *
-     * @example
-     * \`\`\`tsx
-     * // Simple usage
-     * <Flex direction="row" gap="4" align="center">
-     *   <div>Item 1</div>
-     *   <div>Item 2</div>
-     * </Flex>
-     *
-     * // With styling props
-     * <Flex padding="4" background="base-200" rounded>
-     *   <div>Styled flex</div>
-     * </Flex>
-     *
-     * // With width/height (Tailwind presets or CSS values)
-     * <Flex width="full" height="screen" padding="4">...</Flex>
-     * <Flex width="400px" height="200px">...</Flex>
-     * \`\`\`
-     */
-    export declare const Flex: import("sigx").ComponentFactory<FlexProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
-    }>;
-    export type RowProps = Omit<FlexProps, "direction"> & Define.Prop<"reverse", boolean, false>;
-    /**
-     * Horizontal flex container (row direction).
-     *
-     * @example
-     * \`\`\`tsx
-     * <Row gap="4" align="center" padding="4" background="base-200" rounded>
-     *   <div>Left</div>
-     *   <div>Right</div>
-     * </Row>
-     * \`\`\`
-     */
-    export declare const Row: import("sigx").ComponentFactory<RowProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
-    }>;
-    export type ColProps = Omit<FlexProps, "direction"> & Define.Prop<"reverse", boolean, false>;
-    /**
-     * Vertical flex container (column direction).
-     *
-     * @example
-     * \`\`\`tsx
-     * <Col gap="4" align="center" padding="4" background="base-200" rounded>
-     *   <div>Top</div>
-     *   <div>Bottom</div>
-     * </Col>
-     * \`\`\`
-     */
-    export declare const Col: import("sigx").ComponentFactory<ColProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type DividerProps = Define.Prop<"vertical", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
     /**
@@ -4451,59 +4680,77 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Divider: import("sigx").ComponentFactory<DividerProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
-    export type HeroProps = Define.Prop<"overlay", boolean, false> & Define.Prop<"bgImage", string, false> & Define.Prop<"minHeight", string, false> & Define.Prop<"class", string, false> & Define.Slot<"default"> & Define.Slot<"overlay">;
+    export type HeroProps = Define.Prop<"overlay", boolean, false> & Define.Prop<"bgImage", string, false> & Define.Prop<"minHeight", string, false> & BoxStyleProps & Define.Slot<"default"> & Define.Slot<"overlay">;
     export type HeroContentProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
     /**
      * Hero compound component with Content sub-component.
      */
     export declare const Hero: ((props: {
+    	background?: BackgroundColor | undefined;
     	bgImage?: string | undefined;
     	class?: string | undefined;
+    	height?: SizeValue | undefined;
+    	margin?: Spacing | undefined;
     	minHeight?: string | undefined;
     	overlay?: boolean | undefined;
+    	padding?: Spacing | undefined;
+    	rounded?: boolean | RadiusValue | undefined;
+    	width?: SizeValue | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	} & {
-    		overlay: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		overlay?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
     	children?: any;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
+    		background?: BackgroundColor | undefined;
     		bgImage?: string | undefined;
     		class?: string | undefined;
+    		height?: SizeValue | undefined;
+    		margin?: Spacing | undefined;
     		minHeight?: string | undefined;
     		overlay?: boolean | undefined;
+    		padding?: Spacing | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
+    		width?: SizeValue | undefined;
     	}, HeroProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	} & {
-    		overlay: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		overlay?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
+    		background?: BackgroundColor | undefined;
     		bgImage?: string | undefined;
     		class?: string | undefined;
+    		height?: SizeValue | undefined;
+    		margin?: Spacing | undefined;
     		minHeight?: string | undefined;
     		overlay?: boolean | undefined;
+    		padding?: Spacing | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
+    		width?: SizeValue | undefined;
     	};
     	__events: HeroProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	} & {
-    		overlay: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		overlay?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Content: import("sigx").ComponentFactory<HeroContentProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
-    export type FooterProps = Define.Prop<"center", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
+    export type FooterProps = Define.Prop<"center", boolean, false> & BoxStyleProps & Define.Slot<"default">;
     /**
      * Footer component with DaisyUI styling.
      * Provides a styled footer area for website navigation and content.
@@ -4524,47 +4771,65 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Footer: import("sigx").ComponentFactory<FooterProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
-    export type JoinProps = Define.Prop<"vertical", boolean, false> & Define.Prop<"horizontal", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
+    export type JoinProps = Define.Prop<"vertical", boolean, false> & Define.Prop<"horizontal", boolean, false> & BoxStyleProps & Define.Slot<"default">;
     export type JoinItemProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
     /**
      * Join compound component with Item sub-component.
      */
     export declare const Join: ((props: {
+    	background?: BackgroundColor | undefined;
     	class?: string | undefined;
+    	height?: SizeValue | undefined;
     	horizontal?: boolean | undefined;
+    	margin?: Spacing | undefined;
+    	padding?: Spacing | undefined;
+    	rounded?: boolean | RadiusValue | undefined;
     	vertical?: boolean | undefined;
+    	width?: SizeValue | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
     	children?: any;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
+    		background?: BackgroundColor | undefined;
     		class?: string | undefined;
+    		height?: SizeValue | undefined;
     		horizontal?: boolean | undefined;
+    		margin?: Spacing | undefined;
+    		padding?: Spacing | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
     		vertical?: boolean | undefined;
+    		width?: SizeValue | undefined;
     	}, JoinProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
+    		background?: BackgroundColor | undefined;
     		class?: string | undefined;
+    		height?: SizeValue | undefined;
     		horizontal?: boolean | undefined;
+    		margin?: Spacing | undefined;
+    		padding?: Spacing | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
     		vertical?: boolean | undefined;
+    		width?: SizeValue | undefined;
     	};
     	__events: JoinProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Item: import("sigx").ComponentFactory<JoinItemProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type LinkColor = "primary" | "secondary" | "accent" | "neutral" | "info" | "success" | "warning" | "error";
@@ -4583,7 +4848,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Link: import("sigx").ComponentFactory<LinkProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type ChatProps = Define.Prop<"start", boolean, false> & Define.Prop<"end", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
     export type ChatImageProps = Define.Prop<"src", string, false> & Define.Prop<"alt", string, false> & Define.Prop<"placeholder", string, false> & Define.Prop<"bgColor", string, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
@@ -4600,7 +4865,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	start?: boolean | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
@@ -4611,10 +4876,10 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		end?: boolean | undefined;
     		start?: boolean | undefined;
     	}, ChatProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		class?: string | undefined;
     		end?: boolean | undefined;
@@ -4623,20 +4888,20 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__events: ChatProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Image: import("sigx").ComponentFactory<ChatImageProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Header: import("sigx").ComponentFactory<ChatHeaderProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Bubble: import("sigx").ComponentFactory<ChatBubbleProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Footer: import("sigx").ComponentFactory<ChatFooterProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type ArtboardSize = "1" | "2" | "3" | "4" | "5" | "6";
@@ -4666,31 +4931,31 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Artboard: import("sigx").ComponentFactory<ArtboardProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     /**
      * Mockup.Browser component - Browser window mockup with URL bar.
      */
     export declare const MockupBrowser: import("sigx").ComponentFactory<MockupBrowserProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     /**
      * Mockup.Code component - Terminal/code mockup with line prefixes.
      */
     export declare const MockupCode: import("sigx").ComponentFactory<MockupCodeProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     /**
      * Mockup.Phone component - Realistic phone frame mockup.
      */
     export declare const MockupPhone: import("sigx").ComponentFactory<MockupPhoneProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     /**
      * Mockup.Window component - Desktop window mockup with title bar.
      */
     export declare const MockupWindow: import("sigx").ComponentFactory<MockupWindowProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     /**
      * Mockup namespace with Browser, Code, Phone, and Window components.
@@ -4718,16 +4983,16 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      */
     export declare const Mockup: {
     	Browser: import("sigx").ComponentFactory<MockupBrowserProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Code: import("sigx").ComponentFactory<MockupCodeProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Phone: import("sigx").ComponentFactory<MockupPhoneProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Window: import("sigx").ComponentFactory<MockupWindowProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export interface CarouselItemData {
@@ -4748,7 +5013,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	vertical?: boolean | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
@@ -4762,10 +5027,10 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		snap?: "center" | "end" | "start" | undefined;
     		vertical?: boolean | undefined;
     	}, CarouselProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		center?: boolean | undefined;
     		class?: string | undefined;
@@ -4777,11 +5042,11 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__events: CarouselProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Item: import("sigx").ComponentFactory<CarouselItemProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type MaskShape = "squircle" | "heart" | "hexagon" | "hexagon-2" | "decagon" | "pentagon" | "diamond" | "square" | "circle" | "parallelogram" | "parallelogram-2" | "parallelogram-3" | "parallelogram-4" | "star" | "star-2" | "triangle" | "triangle-2" | "triangle-3" | "triangle-4";
@@ -4806,32 +5071,32 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Mask: import("sigx").ComponentFactory<MaskProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export declare const HeroContent: import("sigx").ComponentFactory<HeroContentProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export declare const JoinItem: import("sigx").ComponentFactory<JoinItemProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export declare const ChatImage: import("sigx").ComponentFactory<ChatImageProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export declare const ChatHeader: import("sigx").ComponentFactory<ChatHeaderProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export declare const ChatBubble: import("sigx").ComponentFactory<ChatBubbleProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export declare const ChatFooter: import("sigx").ComponentFactory<ChatFooterProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export declare const CarouselItem: import("sigx").ComponentFactory<CarouselItemProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type ModalPosition = "top" | "middle" | "bottom";
     export type ModalAlign = "start" | "end";
-    export type ModalProps = Define.Model<boolean> & Define.Prop<"class", string, false> & Define.Prop<"position", ModalPosition, false> & Define.Prop<"align", ModalAlign, false> & Define.Prop<"backdrop", boolean, false> & Define.Slot<"default">;
+    export type ModalProps = Define.Model<boolean> & BoxStyleProps & Define.Prop<"position", ModalPosition, false> & Define.Prop<"align", ModalAlign, false> & Define.Prop<"backdrop", boolean, false> & Define.Slot<"default">;
     export type ModalHeaderProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
     export type ModalBodyProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
     export type ModalActionsProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
@@ -4841,13 +5106,19 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     export declare const Modal: ((props: {
     	align?: ModalAlign | undefined;
     	backdrop?: boolean | undefined;
+    	background?: BackgroundColor | undefined;
     	class?: string | undefined;
+    	height?: SizeValue | undefined;
+    	margin?: Spacing | undefined;
+    	padding?: Spacing | undefined;
     	position?: ModalPosition | undefined;
+    	rounded?: boolean | RadiusValue | undefined;
+    	width?: SizeValue | undefined;
     } & {
     	"onUpdate:modelValue"?: ((detail: boolean) => void) | undefined;
     } & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {
     	model?: import("sigx").Model<boolean> | import("sigx").ModelBinding<boolean> | (() => boolean) | undefined;
@@ -4859,34 +5130,46 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		model?: import("sigx").Model<boolean> | undefined;
     		align?: ModalAlign | undefined;
     		backdrop?: boolean | undefined;
+    		background?: BackgroundColor | undefined;
     		class?: string | undefined;
+    		height?: SizeValue | undefined;
+    		margin?: Spacing | undefined;
+    		padding?: Spacing | undefined;
     		position?: ModalPosition | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
+    		width?: SizeValue | undefined;
     	}, ModalProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		model?: import("sigx").Model<boolean> | undefined;
     		align?: ModalAlign | undefined;
     		backdrop?: boolean | undefined;
+    		background?: BackgroundColor | undefined;
     		class?: string | undefined;
+    		height?: SizeValue | undefined;
+    		margin?: Spacing | undefined;
+    		padding?: Spacing | undefined;
     		position?: ModalPosition | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
+    		width?: SizeValue | undefined;
     	};
     	__events: ModalProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Header: import("sigx").ComponentFactory<ModalHeaderProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Body: import("sigx").ComponentFactory<ModalBodyProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Actions: import("sigx").ComponentFactory<ModalActionsProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type BadgeVariant = "primary" | "secondary" | "accent" | "info" | "success" | "warning" | "error" | "ghost" | "neutral";
@@ -4903,7 +5186,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Badge: import("sigx").ComponentFactory<BadgeProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type LoadingSize = "xs" | "sm" | "md" | "lg" | "xl";
     export type LoadingType = "spinner" | "dots" | "ring" | "ball" | "bars" | "infinity";
@@ -4933,9 +5216,9 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Alert: import("sigx").ComponentFactory<AlertProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     } & {
-    	icon: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	icon?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type ProgressColor = "primary" | "secondary" | "accent" | "neutral" | "info" | "success" | "warning" | "error";
     export type ProgressProps = Define.Prop<"value", number, false> & Define.Prop<"max", number, false> & Define.Prop<"color", ProgressColor, false> & Define.Prop<"class", string, false>;
@@ -4971,7 +5254,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	tip?: string | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
@@ -4984,10 +5267,10 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		position?: TooltipPosition | undefined;
     		tip?: string | undefined;
     	}, TooltipProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		class?: string | undefined;
     		color?: TooltipColor | undefined;
@@ -4998,11 +5281,11 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__events: TooltipProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Content: import("sigx").ComponentFactory<TooltipContentProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export interface AccordionItem {
@@ -5043,7 +5326,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	"onUpdate:activeId"?: ((detail: string) => void) | undefined;
     } & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {
     	"model:activeId"?: import("sigx").Model<string> | import("sigx").ModelBinding<string> | (() => string) | undefined;
@@ -5060,10 +5343,10 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		type?: AccordionType | undefined;
     		variant?: AccordionVariant | undefined;
     	}, AccordionProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		activeId?: import("sigx").Model<string> | undefined;
     		change?: import("sigx").EventDefinition<string> | undefined;
@@ -5076,18 +5359,18 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__events: AccordionProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Item: import("sigx").ComponentFactory<AccordionItemProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	} & {
-    		title: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		title?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Collapse: import("sigx").ComponentFactory<CollapseProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	} & {
-    		title: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		title?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type FileInputSize = "xs" | "sm" | "md" | "lg" | "xl";
@@ -5164,7 +5447,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Skeleton: import("sigx").ComponentFactory<SkeletonProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export interface StepItem {
     	id: string;
@@ -5188,7 +5471,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	"onUpdate:modelValue"?: ((detail: string) => void) | undefined;
     } & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {
     	model?: import("sigx").Model<string> | import("sigx").ModelBinding<string> | (() => string) | undefined;
@@ -5204,10 +5487,10 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		items?: StepItem[] | undefined;
     		vertical?: boolean | undefined;
     	}, StepsProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		model?: import("sigx").Model<string> | undefined;
     		change?: import("sigx").EventDefinition<string> | undefined;
@@ -5219,11 +5502,11 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__events: StepsProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Step: import("sigx").ComponentFactory<StepProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type TimelineColor = "primary" | "secondary" | "accent" | "neutral" | "info" | "success" | "warning" | "error";
@@ -5241,7 +5524,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	vertical?: boolean | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
@@ -5254,10 +5537,10 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		snap?: boolean | undefined;
     		vertical?: boolean | undefined;
     	}, TimelineProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		class?: string | undefined;
     		compact?: boolean | undefined;
@@ -5268,20 +5551,20 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__events: TimelineProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Item: import("sigx").ComponentFactory<TimelineItemProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Start: import("sigx").ComponentFactory<TimelineStartProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Middle: import("sigx").ComponentFactory<TimelineMiddleProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	End: import("sigx").ComponentFactory<TimelineEndProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Hr: import("sigx").ComponentFactory<TimelineHrProps, void, {}>;
     };
@@ -5311,7 +5594,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Toast: import("sigx").ComponentFactory<ToastProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type KbdSize = "xs" | "sm" | "md" | "lg" | "xl";
     export type KbdProps = Define.Prop<"size", KbdSize, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
@@ -5340,7 +5623,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Kbd: import("sigx").ComponentFactory<KbdProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type RadialProgressColor = "primary" | "secondary" | "accent" | "neutral" | "info" | "success" | "warning" | "error";
     export type RadialProgressProps = Define.Prop<"value", number> & Define.Prop<"size", string, false> & Define.Prop<"thickness", string, false> & Define.Prop<"color", RadialProgressColor, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
@@ -5350,7 +5633,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * Uses CSS custom properties --value, --size, --thickness.
      */
     export declare const RadialProgress: import("sigx").ComponentFactory<RadialProgressProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type CountdownDigits = 2 | 3;
     export type CountdownProps = Define.Prop<"value", number> & Define.Prop<"digits", CountdownDigits, false> & Define.Prop<"class", string, false>;
@@ -5374,7 +5657,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	class?: string | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
@@ -5383,24 +5666,24 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__setup: import("sigx").SetupFn<{
     		class?: string | undefined;
     	}, DiffProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		class?: string | undefined;
     	};
     	__events: DiffProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Item1: import("sigx").ComponentFactory<DiffItem1Props, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Item2: import("sigx").ComponentFactory<DiffItem2Props, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Resizer: import("sigx").ComponentFactory<{
     		class?: string | undefined;
@@ -5420,7 +5703,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	"onUpdate:modelValue"?: ((detail: boolean) => void) | undefined;
     } & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {
     	model?: import("sigx").Model<boolean> | import("sigx").ModelBinding<boolean> | (() => boolean) | undefined;
@@ -5436,10 +5719,10 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		flip?: boolean | undefined;
     		rotate?: boolean | undefined;
     	}, SwapProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		model?: import("sigx").Model<boolean> | undefined;
     		active?: boolean | undefined;
@@ -5451,17 +5734,17 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__events: SwapProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	On: import("sigx").ComponentFactory<SwapOnProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Off: import("sigx").ComponentFactory<SwapOffProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Indeterminate: import("sigx").ComponentFactory<SwapIndeterminateProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type IndicatorHorizontal = "start" | "center" | "end";
@@ -5473,7 +5756,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	class?: string | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
@@ -5482,21 +5765,21 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__setup: import("sigx").SetupFn<{
     		class?: string | undefined;
     	}, IndicatorProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		class?: string | undefined;
     	};
     	__events: IndicatorProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Item: import("sigx").ComponentFactory<IndicatorItemProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type StatusColor = "primary" | "secondary" | "accent" | "neutral" | "info" | "success" | "warning" | "error";
@@ -5522,7 +5805,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     export type TabsVariant = "border" | "lift" | "box";
     export type TabsSize = "xs" | "sm" | "md" | "lg" | "xl";
     export type TabsPosition = "top" | "bottom";
-    export type TabsProps = Define.Prop<"tabs", Tab[]> & Define.Prop<"activeTab", string> & Define.Prop<"variant", TabsVariant, false> & Define.Prop<"size", TabsSize, false> & Define.Prop<"position", TabsPosition, false> & Define.Prop<"name", string, false> & Define.Prop<"contentClass", string, false> & Define.Prop<"class", string, false> & Define.Event<"change", string>;
+    export type TabsProps = Define.Prop<"tabs", Tab[]> & Define.Prop<"activeTab", string> & Define.Prop<"variant", TabsVariant, false> & Define.Prop<"size", TabsSize, false> & Define.Prop<"position", TabsPosition, false> & Define.Prop<"name", string, false> & Define.Prop<"background", BackgroundColor, false> & Define.Prop<"rounded", RadiusValue | boolean, false> & Define.Prop<"width", SizeValue, false> & Define.Prop<"padding", Spacing, false> & Define.Prop<"contentClass", string, false> & Define.Prop<"class", string, false> & Define.Event<"change", string>;
     /**
      * Tabs component with DaisyUI styling.
      * Uses radio inputs for native tab switching with content panels.
@@ -5547,21 +5830,25 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      */
     export declare const Tabs: import("sigx").ComponentFactory<TabsProps, void, {}>;
     export type MenuSize = "xs" | "sm" | "md" | "lg";
-    export type MenuProps = Define.Model<string> & Define.Prop<"size", MenuSize, false> & Define.Prop<"horizontal", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default"> & Define.Event<"update:modelValue", string>;
-    export type MenuItemProps = Define.Prop<"value", string, false> & Define.Prop<"active", boolean, false> & Define.Prop<"disabled", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
+    export type MenuProps = Define.Model<string> & Define.Prop<"size", MenuSize, false> & Define.Prop<"horizontal", boolean, false> & Define.Prop<"background", BackgroundColor, false> & Define.Prop<"rounded", RadiusValue | boolean, false> & Define.Prop<"width", SizeValue, false> & Define.Prop<"padding", Spacing, false> & Define.Prop<"class", string, false> & Define.Slot<"default"> & Define.Event<"update:modelValue", string>;
+    export type MenuItemProps = Define.Prop<"value", string, false> & Define.Prop<"active", boolean, false> & Define.Prop<"submenu", boolean, false> & Define.Prop<"disabled", boolean, false> & Define.Prop<"href", string, false> & Define.Prop<"asChild", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
     export type MenuTitleProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
     /**
      * Menu compound component with Item and Title sub-components.
      */
     export declare const Menu: ((props: {
+    	background?: BackgroundColor | undefined;
     	class?: string | undefined;
     	horizontal?: boolean | undefined;
+    	padding?: Spacing | undefined;
+    	rounded?: boolean | RadiusValue | undefined;
     	size?: MenuSize | undefined;
+    	width?: SizeValue | undefined;
     } & {
     	"onUpdate:modelValue"?: ((detail: string) => void) | undefined;
     } & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {
     	model?: import("sigx").Model<string> | import("sigx").ModelBinding<string> | (() => string) | undefined;
@@ -5571,35 +5858,43 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		model?: import("sigx").Model<string> | undefined;
+    		background?: BackgroundColor | undefined;
     		class?: string | undefined;
     		horizontal?: boolean | undefined;
+    		padding?: Spacing | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
     		size?: MenuSize | undefined;
+    		width?: SizeValue | undefined;
     	}, MenuProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		model?: import("sigx").Model<string> | undefined;
+    		background?: BackgroundColor | undefined;
     		class?: string | undefined;
     		horizontal?: boolean | undefined;
+    		padding?: Spacing | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
     		size?: MenuSize | undefined;
+    		width?: SizeValue | undefined;
     	};
     	__events: MenuProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Item: import("sigx").ComponentFactory<MenuItemProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Title: import("sigx").ComponentFactory<MenuTitleProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type DropdownPosition = "end" | "top" | "bottom" | "left" | "right";
-    export type DropdownProps = Define.Prop<"position", DropdownPosition, false> & Define.Prop<"hover", boolean, false> & Define.Prop<"class", string, false> & Define.Prop<"menuClass", string, false> & Define.Slot<"trigger"> & Define.Slot<"default">;
+    export type DropdownProps = Define.Prop<"position", DropdownPosition, false> & Define.Prop<"hover", boolean, false> & Define.Prop<"background", BackgroundColor, false> & Define.Prop<"rounded", RadiusValue | boolean, false> & Define.Prop<"width", SizeValue, false> & Define.Prop<"padding", Spacing, false> & Define.Prop<"class", string, false> & Define.Prop<"menuClass", string, false> & Define.Slot<"trigger"> & Define.Slot<"default">;
     /**
      * Dropdown component with DaisyUI styling.
      * Uses slots for maximum flexibility - any component can be the trigger.
@@ -5632,11 +5927,11 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Dropdown: import("sigx").ComponentFactory<DropdownProps, void, {
-    	trigger: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	trigger?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     } & {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
-    export type DrawerProps = Define.Model<boolean> & Define.Prop<"side", "left" | "right", false> & Define.Prop<"responsive", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default"> & Define.Slot<"side">;
+    export type DrawerProps = Define.Model<boolean> & Define.Prop<"side", "left" | "right", false> & Define.Prop<"responsive", boolean, false> & Define.Prop<"background", BackgroundColor, false> & Define.Prop<"rounded", RadiusValue | boolean, false> & Define.Prop<"width", SizeValue, false> & Define.Prop<"padding", Spacing, false> & Define.Prop<"class", string, false> & Define.Slot<"default"> & Define.Slot<"side">;
     /**
      * Drawer component with DaisyUI styling.
      * Slide-out side panel for navigation, filters, and mobile menus.
@@ -5655,9 +5950,9 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Drawer: import("sigx").ComponentFactory<DrawerProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     } & {
-    	side: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	side?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export interface BreadcrumbItem {
     	id: string;
@@ -5679,7 +5974,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Breadcrumbs: import("sigx").ComponentFactory<BreadcrumbsProps, void, {}>;
-    export type NavbarProps = Define.Prop<"class", string, false> & Define.Slot<"start"> & Define.Slot<"center"> & Define.Slot<"end">;
+    export type NavbarProps = BoxStyleProps & Define.Slot<"start"> & Define.Slot<"center"> & Define.Slot<"end">;
     /**
      * Navbar component with DaisyUI styling.
      *
@@ -5694,11 +5989,11 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Navbar: import("sigx").ComponentFactory<NavbarProps, void, {
-    	start: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	start?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     } & {
-    	center: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	center?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     } & {
-    	end: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	end?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type PaginationProps = Define.Prop<"currentPage", number> & Define.Prop<"totalPages", number> & Define.Prop<"class", string, false> & Define.Event<"change", number>;
     /**
@@ -5744,7 +6039,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	zebra?: boolean | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
@@ -5757,10 +6052,10 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		size?: TableSize | undefined;
     		zebra?: boolean | undefined;
     	}, TableProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		class?: string | undefined;
     		pinCols?: boolean | undefined;
@@ -5771,26 +6066,26 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__events: TableProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Head: import("sigx").ComponentFactory<TheadProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Body: import("sigx").ComponentFactory<TbodyProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Foot: import("sigx").ComponentFactory<TfootProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Row: import("sigx").ComponentFactory<TrProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Th: import("sigx").ComponentFactory<ThProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Td: import("sigx").ComponentFactory<TdProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type AvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
@@ -5829,8 +6124,8 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		size?: AvatarSize | undefined;
     		src?: string | undefined;
     	}, AvatarProps, void, {}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
     		alt?: string | undefined;
     		class?: string | undefined;
@@ -5848,7 +6143,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	__slots: {};
     } & {
     	Group: import("sigx").ComponentFactory<AvatarGroupProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type StatTitleProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
@@ -5857,47 +6152,65 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     export type StatFigureProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
     export type StatActionsProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
     export type StatProps = Define.Prop<"class", string, false> & Define.Slot<"default">;
-    export type StatsProps = Define.Prop<"vertical", boolean, false> & Define.Prop<"horizontal", boolean, false> & Define.Prop<"shadow", boolean, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
+    export type StatsProps = Define.Prop<"vertical", boolean, false> & Define.Prop<"horizontal", boolean, false> & Define.Prop<"shadow", boolean, false> & BoxStyleProps & Define.Slot<"default">;
     export declare const Stats: ((props: {
+    	background?: BackgroundColor | undefined;
     	class?: string | undefined;
+    	height?: SizeValue | undefined;
     	horizontal?: boolean | undefined;
+    	margin?: Spacing | undefined;
+    	padding?: Spacing | undefined;
+    	rounded?: boolean | RadiusValue | undefined;
     	shadow?: boolean | undefined;
     	vertical?: boolean | undefined;
+    	width?: SizeValue | undefined;
     } & {} & {
     	slots?: Partial<{
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
     	children?: any;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
+    		background?: BackgroundColor | undefined;
     		class?: string | undefined;
+    		height?: SizeValue | undefined;
     		horizontal?: boolean | undefined;
+    		margin?: Spacing | undefined;
+    		padding?: Spacing | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
     		shadow?: boolean | undefined;
     		vertical?: boolean | undefined;
+    		width?: SizeValue | undefined;
     	}, StatsProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
-    	__name?: string | undefined;
-    	__islandId?: string | undefined;
+    	__name?: string;
+    	__islandId?: string;
     	__props: {
+    		background?: BackgroundColor | undefined;
     		class?: string | undefined;
+    		height?: SizeValue | undefined;
     		horizontal?: boolean | undefined;
+    		margin?: Spacing | undefined;
+    		padding?: Spacing | undefined;
+    		rounded?: boolean | RadiusValue | undefined;
     		shadow?: boolean | undefined;
     		vertical?: boolean | undefined;
+    		width?: SizeValue | undefined;
     	};
     	__events: StatsProps;
     	__ref: void;
     	__slots: {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	};
     } & {
     	Item: ((props: {
     		class?: string | undefined;
     	} & {} & {
     		slots?: Partial<{
-    			default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    			default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     		}> | undefined;
     	} & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     		ref?: import("sigx").Ref<void> | undefined;
@@ -5906,49 +6219,49 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		__setup: import("sigx").SetupFn<{
     			class?: string | undefined;
     		}, StatProps, void, {
-    			default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    			default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     		}>;
-    		__name?: string | undefined;
-    		__islandId?: string | undefined;
+    		__name?: string;
+    		__islandId?: string;
     		__props: {
     			class?: string | undefined;
     		};
     		__events: StatProps;
     		__ref: void;
     		__slots: {
-    			default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    			default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     		};
     	} & {
     		Title: import("sigx").ComponentFactory<StatTitleProps, void, {
-    			default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    			default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     		}>;
     		Value: import("sigx").ComponentFactory<StatValueProps, void, {
-    			default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    			default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     		}>;
     		Desc: import("sigx").ComponentFactory<StatDescProps, void, {
-    			default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    			default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     		}>;
     		Figure: import("sigx").ComponentFactory<StatFigureProps, void, {
-    			default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    			default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     		}>;
     		Actions: import("sigx").ComponentFactory<StatActionsProps, void, {
-    			default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    			default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     		}>;
     	};
     	Title: import("sigx").ComponentFactory<StatTitleProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Value: import("sigx").ComponentFactory<StatValueProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Desc: import("sigx").ComponentFactory<StatDescProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Figure: import("sigx").ComponentFactory<StatFigureProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     	Actions: import("sigx").ComponentFactory<StatActionsProps, void, {
-    		default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    		default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     	}>;
     };
     export type TextSize = "xs" | "sm" | "base" | "lg" | "xl" | "2xl" | "3xl" | "4xl" | "5xl";
@@ -5978,7 +6291,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     declare const Text\$1: import("sigx").ComponentFactory<TextProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
     export type HeadingProps = Define.Prop<"level", HeadingLevel, false> & Define.Prop<"size", TextSize, false> & Define.Prop<"weight", TextWeight, false> & Define.Prop<"color", TextColor, false> & Define.Prop<"align", TextAlign, false> & Define.Prop<"margin", Spacing, false> & Define.Prop<"class", string, false> & Define.Slot<"default">;
@@ -5993,7 +6306,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
      * \`\`\`
      */
     export declare const Heading: import("sigx").ComponentFactory<HeadingProps, void, {
-    	default: () => import("sigx").JSXElement[] | import("sigx").JSXElement;
+    	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;
     export type IconSize = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
     export type IconProps = Define.Prop<"icon", string> & Define.Prop<"size", IconSize, false> & Define.Prop<"class", string, false>;

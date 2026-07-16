@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-16
+
 ### Fixed
 
 - **The playground's IntelliSense advertised APIs that no longer exist** ([#50](https://github.com/signalxjs/live-code/issues/50)). `src/types/generated-modules.ts` — the bundled type snapshot Monaco uses to typecheck playground snippets — is generated from whatever is installed in `node_modules`, and the peer floors (`sigx >=0.4.0`, `@sigx/store >=0.3.0`, `@sigx/daisyui >=0.3.0`) resolved to `sigx@0.7.0` / `@sigx/store@0.3.2` / `@sigx/daisyui@0.3.2`. The shipped snapshot therefore still declared `Suspense`/`SuspenseProps`, `useAsync` (with `throwOnError`), `ErrorBoundary`/`ErrorBoundaryProps`, and an app-config `errorHandler` — **all removed in core 0.9**. Playground users got completions and type-checking for APIs that fail at runtime. The snapshot is now regenerated against the core 0.10 set: those four symbols are gone, and core 0.10's actual async surface (`useData`, `useAction`, `Defer`, `errorScope`, `app.onError`) is present.

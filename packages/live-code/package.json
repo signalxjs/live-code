@@ -60,12 +60,12 @@
         "@shikijs/langs": "^3.21.0",
         "@shikijs/monaco": "^3.7.0",
         "@shikijs/themes": "^3.21.0",
-        "@sigx/monaco-editor": "^0.2.0",
-        "@sigx/vite": "^0.7.0",
+        "@sigx/monaco-editor": "^0.3.0",
+        "@sigx/vite": "^0.10.0",
         "@types/node": "^22.19.1",
         "dts-bundle-generator": "^9.5.1",
         "shiki": "^3.7.0",
-        "sigx": "^0.7.0",
+        "sigx": "^0.10.0",
         "tsx": "^4.19.0",
         "typescript": "^5.9.3",
         "vite": "^8.0.3"
@@ -74,12 +74,12 @@
         "@shikijs/langs": ">=3.7.0",
         "@shikijs/monaco": ">=3.7.0",
         "@shikijs/themes": ">=3.7.0",
-        "@sigx/daisyui": ">=0.3.0",
-        "@sigx/monaco-editor": ">=0.1.0",
-        "@sigx/router": ">=0.7.0",
-        "@sigx/store": ">=0.3.0",
+        "@sigx/daisyui": ">=0.8.0 <0.9.0",
+        "@sigx/monaco-editor": ">=0.3.0 <0.4.0",
+        "@sigx/router": ">=0.8.0 <0.9.0",
+        "@sigx/store": ">=0.8.0 <0.9.0",
         "shiki": ">=3.7.0",
-        "sigx": ">=0.4.0"
+        "sigx": ">=0.10.0 <0.11.0"
     },
     "peerDependenciesMeta": {
         "@sigx/router": {

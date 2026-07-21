@@ -4,7 +4,7 @@
  * Monaco Editor type definitions for SignalX packages.
  * Generated using dts-bundle-generator from actual source files.
  * 
- * Generated: 2026-07-16T13:10:31.284Z
+ * Generated: 2026-07-21T06:17:33.970Z
  * 
  * To regenerate: pnpm run generate:types
  */
@@ -1352,6 +1352,29 @@ export const sigxModuleTypes = `declare module "sigx" {
      */
     export declare function effect(fn: EffectFn, options?: EffectOptions): EffectRunner;
     /**
+     * Register an arbitrary disposer with the currently-active scope — the
+     * component setup being collected, or the innermost running \`effectScope()\`.
+     * Returns \`false\` (without retaining \`fn\`) when no scope is active; the
+     * caller owns the teardown itself then.
+     *
+     * This is the same registration path \`effect()\` and \`watch()\` use for their
+     * own disposers, exposed for non-reactive resources (event listeners, timers,
+     * observers) whose lifetime must match the owning scope's.
+     *
+     * @example
+     * \`\`\`ts
+     * function useIntervalFn(fn: () => void, ms: number) {
+     *   const id = setInterval(fn, ms);
+     *   onScopeDispose(() => clearInterval(id));
+     * }
+     *
+     * const scope = effectScope();
+     * scope.run(() => useIntervalFn(tick, 1000));
+     * scope.stop(); // interval cleared
+     * \`\`\`
+     */
+    export declare function onScopeDispose(fn: () => void): boolean;
+    /**
      * Execute a function without tracking any reactive dependencies.
      * Useful for reading signals inside an effect without creating a subscription.
      *
@@ -1448,6 +1471,25 @@ export const sigxModuleTypes = `declare module "sigx" {
      */
     export declare function signal<T extends Primitive>(target: T): PrimitiveSignal<T>;
     export declare function signal<T extends object>(target: T): Signal<T>;
+    /**
+     * Check whether a value is a signal-shaped \`{ value }\` handle: a
+     * primitive-wrapper signal created by \`signal(primitive)\`, or a property
+     * view from \`toSignal\`/\`toSignals\`.
+     *
+     * Returns \`false\` for object signals (use \`isReactive\`) and computeds
+     * (use \`isComputed\`).
+     *
+     * @example
+     * \`\`\`ts
+     * isSignal(signal(0));            // true
+     * isSignal(toSignal(state, 'x')); // true
+     * isSignal(signal({ x: 1 }));     // false — object signal
+     * isSignal({ value: 1 });         // false — plain object
+     * \`\`\`
+     */
+    export declare function isSignal(value: unknown): value is {
+    	value: unknown;
+    };
     /**
      * A signal-shaped live view over a single property of a reactive object.
      * Reads and writes delegate to the source, so reactivity is preserved.
@@ -1800,6 +1842,15 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 * For HMR: first set ctx.renderFn to the new render function, then call update().
     	 */
     	update(): void;
+    	/**
+    	 * Reload this instance against a new setup body — for HMR only. Disposes
+    	 * the previous run's onUnmounted cleanups, clears all lifecycle hook lists
+    	 * (so hot updates don't accumulate hooks), re-runs \`setup\`, then re-fires
+    	 * the new created/mounted hooks and re-renders. See core#107.
+    	 *
+    	 * @internal Present only in dev builds; \`undefined\` in production.
+    	 */
+    	__hmrReload?(setup: SetupFn<any, any, any, any>): void;
     }
     export type ViewFn = () => JSXElement | JSXElement[] | undefined;
     /**
@@ -2380,6 +2431,28 @@ export const sigxModuleTypes = `declare module "sigx" {
      */
     export type UnmountFn<TContainer = any> = (container: TContainer) => void;
     /**
+     * Options for \`app.runWithContext()\`.
+     */
+    export interface RunWithContextOptions {
+    	/**
+    	 * Dev-only: tailor the async-callback warning for wrapping libraries.
+    	 *
+    	 * A string replaces the default remediation sentence of the warning (the
+    	 * sync-only diagnosis stays), so a library that runs user callbacks in
+    	 * app context — a router invoking navigation guards, a scheduler running
+    	 * handlers — can address the advice to ITS callers, who never see the
+    	 * \`runWithContext\` call site and cannot act on the default text.
+    	 *
+    	 * \`false\` suppresses the warning for this call entirely — for callers
+    	 * that deliberately use only the synchronous portion or re-enter the
+    	 * context themselves per continuation. Suppressed calls do not consume
+    	 * the once-per-app warning slot.
+    	 *
+    	 * Ignored in production builds.
+    	 */
+    	asyncAdvice?: string | false;
+    }
+    /**
      * The App instance returned by defineApp().
      * Provides a chainable API for configuring and mounting the application.
      *
@@ -2452,6 +2525,13 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 * deferred: browsers have no ALS, so the behavior would silently diverge
     	 * client-side — revisit when TC39 AsyncContext lands cross-platform.)
     	 *
+    	 * Libraries that run user-authored callbacks in app context can tailor
+    	 * that warning with \`options.asyncAdvice\`: a string replaces the default
+    	 * remediation sentence (so the advice reaches the callback's author, who
+    	 * never sees the \`runWithContext\` call site), \`false\` suppresses the
+    	 * warning for the call without consuming the once-per-app slot. The
+    	 * warning still fires at most once per app across all callers.
+    	 *
     	 * @example
     	 * \`\`\`typescript
     	 * const useAuthStore = defineFactory(() => createAuthStore(), 'scoped');
@@ -2463,9 +2543,18 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 * });
     	 * \`\`\`
     	 *
+    	 * @example
+    	 * \`\`\`typescript
+    	 * // A library wrapping user callbacks re-attributes the async warning:
+    	 * app.runWithContext(() => userGuard(to, from), {
+    	 *     asyncAdvice: '(from my-router) Resolve injectables at the top of ' +
+    	 *         'the guard, before the first await.'
+    	 * });
+    	 * \`\`\`
+    	 *
     	 * @returns The return value of \`fn\`.
     	 */
-    	runWithContext<T>(fn: () => T): T;
+    	runWithContext<T>(fn: () => T, options?: RunWithContextOptions): T;
     	/**
     	 * Register lifecycle hooks to observe all components
     	 */
@@ -2832,16 +2921,6 @@ export const sigxModuleTypes = `declare module "sigx" {
      * \`\`\`
      */
     export declare function isComponent(type: unknown): type is ComponentLike;
-    export interface ErrorScopeOptions {
-    	/** Rendered in place of the subtree while errored. Omitted ⇒ renders nothing. */
-    	fallback?: (error: Error, retry: () => void) => JSXElement;
-    	/** Observer — called before the fallback renders. Its own throws are swallowed. */
-    	onError?: (error: Error, instance: ComponentInstance | null, info: string) => void;
-    }
-    /**
-     * Scope the calling component's subtree. Setup-only.
-     */
-    export declare function errorScope(options: ErrorScopeOptions): void;
     /**
      * Structured error system for SignalX runtime.
      *
@@ -2904,6 +2983,16 @@ export const sigxModuleTypes = `declare module "sigx" {
     export declare function provideOutsideSetupError(): SigxError;
     export declare function requiredInjectableNotProvidedError(name: string): SigxError;
     export declare function provideInvalidInjectableError(): SigxError;
+    export interface ErrorScopeOptions {
+    	/** Rendered in place of the subtree while errored. Omitted ⇒ renders nothing. */
+    	fallback?: (error: Error, retry: () => void) => JSXElement;
+    	/** Observer — called before the fallback renders. Its own throws are swallowed. */
+    	onError?: (error: Error, instance: ComponentInstance | null, info: string) => void;
+    }
+    /**
+     * Scope the calling component's subtree. Setup-only.
+     */
+    export declare function errorScope(options: ErrorScopeOptions): void;
     /** Check whether a value is thenable (Promise-like). */
     export declare function isPromise(value: any): boolean;
     /** @deprecated Use the {@link isPromise} function export instead. Kept until dependents (e.g. @sigx/store) migrate. */
@@ -3821,6 +3910,12 @@ export const storeModuleTypes = `declare module "@sigx/store" {
      * its setup returns. Plugins run in registration order; a throwing plugin is
      * isolated and cannot break store creation. Returns a Subscription whose
      * unsubscribe stops future invocations.
+     *
+     * SSR note: the registry is module-global (process-wide), by design — like a
+     * global middleware hook. Under server rendering it therefore applies to every
+     * app and every request in the process, not per request. Register plugins once
+     * at startup; don't register per request. This is intentional, not an injectable
+     * per-app service (see the \`instanceCounters\` note below for the same rationale).
      */
     export declare function onStoreCreated(plugin: (ctx: StorePluginContext) => void): Subscription;
     /**

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-21
+
+### Changed
+
+- **Aligned with SignalX core 0.12** ([#57](https://github.com/signalxjs/live-code/issues/57)). Core moved 0.10 → 0.11 → 0.12 on npm `latest`, and the satellites followed (daisyui/router/store 0.9, all peering `sigx ^0.12.0`). live-code 0.4.0's `<0.9` peers on daisyui/router/store were an unmaskable diamond conflict with the core-0.12 stack — the primary blocker holding the docs site on core 0.10.
+  - `sigx`: `>=0.10.0 <0.11.0` → `>=0.12.0 <0.13.0`
+  - `@sigx/monaco-editor`: `>=0.3.0 <0.4.0` → `>=0.4.0 <0.5.0`
+  - `@sigx/router`: `>=0.8.0 <0.9.0` → `>=0.9.0 <0.10.0`
+  - `@sigx/store`: `>=0.8.0 <0.9.0` → `>=0.9.0 <0.10.0`
+  - `@sigx/daisyui`: `>=0.8.0 <0.9.0` → `>=0.9.0 <0.10.0`
+  - devDependencies: `sigx`, `@sigx/vite` → `^0.12.0`; `@sigx/monaco-editor` → `^0.4.0`
+  - `@sigx/router`, `@sigx/store`, and `@sigx/daisyui` remain optional peers, reached via the sandbox's `window.__SIGX_*` globals rather than bound directly.
+
+  No source changes: the runtime binds only stable core primitives (`component`, `signal`, `onMounted`, `onUnmounted`, `render`).
+
+- **Regenerated the playground IntelliSense snapshot against core 0.12** ([#57](https://github.com/signalxjs/live-code/issues/57)). `src/types/generated-modules.ts` — the bundled type snapshot Monaco uses to typecheck playground snippets — now reflects the core 0.12 + satellites 0.9 public surface, picking up new API such as `onScopeDispose` and the signal type-guards.
+
 ## [0.4.0] - 2026-07-16
 
 ### Fixed

@@ -4,7 +4,7 @@
  * Monaco Editor type definitions for SignalX packages.
  * Generated using dts-bundle-generator from actual source files.
  * 
- * Generated: 2026-07-21T06:17:33.970Z
+ * Generated: 2026-07-23T15:22:36.749Z
  * 
  * To regenerate: pnpm run generate:types
  */
@@ -2095,6 +2095,33 @@ export const sigxModuleTypes = `declare module "sigx" {
     	_token: symbol;
     }
     /**
+     * Options for the factory form of \`defineInjectable\`.
+     */
+    export interface DefineInjectableOptions {
+    	/**
+    	 * Diagnostics name for this injectable — the token description used by dev
+    	 * warnings and devtools. Without it the name comes from \`factory.name\`,
+    	 * which inline arrow factories don't have.
+    	 */
+    	name?: string;
+    }
+    /**
+     * Options for the required (name-string) form of \`defineInjectable\`.
+     */
+    export interface DefineRequiredInjectableOptions {
+    	/**
+    	 * Replaces the generated \`suggestion\` on the SIGX202 error thrown when the
+    	 * injectable is used unprovided. Use it when the remedy is not
+    	 * \`defineProvide\` — e.g. a pack whose injectable is satisfied by rendering
+    	 * something: \`'Render the component as a route inside <Stack>.'\`
+    	 *
+    	 * Read only in dev builds, but note the string lives in YOUR module, so it
+    	 * ships in your production bundle regardless. Gate it yourself if the bytes
+    	 * matter: \`hint: __DEV__ ? '...' : undefined\`.
+    	 */
+    	hint?: string;
+    }
+    /**
      * The metadata defineProvide actually needs — satisfied by both
      * InjectableFunction and parameterized FactoryFunction use-functions.
      */
@@ -2115,6 +2142,12 @@ export const sigxModuleTypes = `declare module "sigx" {
      * structured error (SIGX202) naming the injectable. Use this for services
      * that must be provided per app — e.g. per-request services under SSR.
      *
+     * Each form takes its own options: \`{ name }\` on the factory form gives
+     * diagnostics something to call an injectable whose factory is an inline arrow
+     * (see {@link DefineInjectableOptions}); \`{ hint }\` on the required form
+     * replaces the SIGX202 suggestion when the remedy isn't \`defineProvide\` (see
+     * {@link DefineRequiredInjectableOptions}).
+     *
      * @example
      * \`\`\`typescript
      * // Define a service with a zero-config fallback
@@ -2129,10 +2162,15 @@ export const sigxModuleTypes = `declare module "sigx" {
      * // A required service: no fallback, must be provided
      * const useRouter = defineInjectable<Router>('Router');
      * app.defineProvide(useRouter, () => createRouter(url));
+     *
+     * // A pack whose injectable is satisfied by rendering, not by defineProvide
+     * const useScreen = defineInjectable<Screen>('Screen', {
+     *     hint: 'Render the component as a route inside <Stack>.',
+     * });
      * \`\`\`
      */
-    export declare function defineInjectable<T>(factory: () => T): InjectableFunction<T>;
-    export declare function defineInjectable<T>(name: string): InjectableFunction<T>;
+    export declare function defineInjectable<T>(factory: () => T, options?: DefineInjectableOptions): InjectableFunction<T>;
+    export declare function defineInjectable<T>(name: string, options?: DefineRequiredInjectableOptions): InjectableFunction<T>;
     /**
      * Provide a new instance of an injectable at the current component level.
      * Child components will receive this instance when calling the injectable function.
@@ -2766,6 +2804,19 @@ export const sigxModuleTypes = `declare module "sigx" {
     /** Tuple elements are JSON primitives only — identity is canonical JSON. */
     export type KeyTuple = readonly (string | number | boolean | null)[];
     export type KeyValue = string | KeyTuple;
+    /**
+     * A server-fn reference usable AS a key (rfc-server §6.2, #452): any
+     * callable carrying the build-stamped stable key (\`<stableId>#<name>\`).
+     * Structural — runtime-core never imports \`@sigx/server\`; the brand is the
+     * stamped property. As a key it canonicalizes to the key STRING in place
+     * (\`useData(getVotes)\` → \`'["<stableId>#getVotes"]'\`), so a mutation's
+     * fn-ref \`invalidates\` pattern matches by tuple prefix.
+     */
+    export interface ServerFnDataRef<A extends KeyTuple = KeyTuple, R = unknown> {
+    	(...args: A): R | Promise<R>;
+    	/** Build-stamped stable key (\`<stableId>#<name>\`). */
+    	__sigxKey: string;
+    }
     export interface AsyncFetcherContext {
     	/**
     	 * Pass it straight to fetch():  fetch(url, { signal })
@@ -2820,6 +2871,16 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 */
     	server?: boolean;
     }
+    /** Server-fn key (#452): data identity IS the fn — canonical key
+     *  \`'["<stableId>#<name>"]'\`, default fetcher \`() => fn()\`. */
+    export declare function useData<R>(fn: ServerFnDataRef<[
+    ], R>, opts?: AsyncOptions): AsyncState<Awaited<R>>;
+    /** Reactive server-fn tuple key: \`() => [fn, ...args]\`; falsy ⇒ idle.
+     *  Default fetcher \`fn(...args)\`; args are the fn's own parameters. */
+    export declare function useData<A extends KeyTuple, R>(key: () => readonly [
+    	ServerFnDataRef<A, R>,
+    	...A
+    ] | Falsy, opts?: AsyncOptions): AsyncState<Awaited<R>>;
     /** Static key: runs on the server, serialized under \`key\`, restored on hydration. */
     export declare function useData<T>(key: string, fetcher: Fetcher<T, string>, opts?: AsyncOptions): AsyncState<T>;
     /** Reactive key: string or tuple; a falsy result skips the fetch (state 'idle'). */
@@ -2981,7 +3042,12 @@ export const sigxModuleTypes = `declare module "sigx" {
     export declare function asyncSetupClientError(componentName: string): SigxError;
     export declare function errorScopeOutsideSetupError(): SigxError;
     export declare function provideOutsideSetupError(): SigxError;
-    export declare function requiredInjectableNotProvidedError(name: string): SigxError;
+    /**
+     * @param hint - Dev-only replacement for the generated suggestion. A pack whose
+     * injectable is satisfied by rendering something (\`<NavigationRoot>\`) rather
+     * than by \`defineProvide\` passes its own remedy here.
+     */
+    export declare function requiredInjectableNotProvidedError(name: string, hint?: string): SigxError;
     export declare function provideInvalidInjectableError(): SigxError;
     export interface ErrorScopeOptions {
     	/** Rendered in place of the subtree while errored. Omitted ⇒ renders nothing. */
@@ -3730,7 +3796,7 @@ export const routerModuleTypes = `declare module "@sigx/router" {
     export declare function onBeforeRouteUpdate(guard: RouteEnterGuard): void;
     export type RouterViewProps = Define.Prop<"name", string> & Define.Prop<"pageProps", Record<string, unknown>>;
     export declare const RouterView: ComponentFactory<RouterViewProps, void, {}>;
-    export type LinkProps = Define.Prop<"to", RouteLocationRaw, true> & Define.Prop<"replace", boolean> & Define.Prop<"activeClass", string> & Define.Prop<"exactActiveClass", string> & Define.Prop<"ariaCurrentValue", "page" | "step" | "location" | "date" | "time" | "true" | "false"> & Define.Event<"click", MouseEvent> & Define.Slot<"default">;
+    export type LinkProps = Define.Prop<"to", RouteLocationRaw, true> & Define.Prop<"replace", boolean> & Define.Prop<"class", string> & Define.Prop<"style", string> & Define.Prop<"activeClass", string> & Define.Prop<"exactActiveClass", string> & Define.Prop<"ariaCurrentValue", "page" | "step" | "location" | "date" | "time" | "true" | "false"> & Define.Event<"click", MouseEvent> & Define.Slot<"default">;
     export declare const Link: import("sigx").ComponentFactory<LinkProps, void, {
     	default?: (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | undefined;
     }>;

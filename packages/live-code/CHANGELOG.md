@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-23
+
+### Changed
+
+- **Aligned with SignalX core 0.13** ([#64](https://github.com/signalxjs/live-code/issues/64)). The pnpm catalog moves `sigx` and `@sigx/vite` to `^0.13.0`, and the tier-1 sibling peers follow the versions just published (each one minor up):
+  - `sigx`, `@sigx/vite` (catalog): `^0.12.0` → `^0.13.0`
+  - `@sigx/monaco-editor`: dev `^0.4.0` → `^0.5.0`, peer `>=0.4.0 <0.5.0` → `>=0.5.0 <0.6.0`
+  - `@sigx/router`: `>=0.9.0 <0.10.0` → `>=0.10.0 <0.11.0`
+  - `@sigx/store`: `>=0.9.0 <0.10.0` → `>=0.10.0 <0.11.0`
+  - `@sigx/daisyui`: `>=0.9.0 <0.10.0` → `>=0.10.0 <0.11.0`
+
+  No source changes: the runtime binds only stable core primitives (`component`, `signal`, `onMounted`, `onUnmounted`, `render`).
+
+- **Regenerated the playground IntelliSense snapshot against core 0.13** ([#64](https://github.com/signalxjs/live-code/issues/64)). `src/types/generated-modules.ts` — the bundled type snapshot Monaco uses to typecheck playground snippets — now reflects the core 0.13 + satellites 0.10 public surface (e.g. the `defineInjectable` options forms).
+
 ## [0.5.0] - 2026-07-21
 
 ### Changed

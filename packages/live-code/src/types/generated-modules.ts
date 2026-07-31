@@ -4,7 +4,7 @@
  * Monaco Editor type definitions for SignalX packages.
  * Generated using dts-bundle-generator from actual source files.
  * 
- * Generated: 2026-07-23T15:22:36.749Z
+ * Generated: 2026-07-31T18:15:06.275Z
  * 
  * To regenerate: pnpm run generate:types
  */
@@ -825,11 +825,6 @@ declare namespace JSX {
 
     interface IntrinsicAttributes {
         key?: string | number | null;
-        id?: string;
-        class?: string;
-        style?: string | CSSProperties;
-        [key: \`data-\${string}\`]: any;
-        [key: \`aria-\${string}\`]: any;
     }
 
     interface IntrinsicElements {
@@ -1601,6 +1596,32 @@ export const sigxModuleTypes = `declare module "sigx" {
     export interface ComponentAttributeExtensions {
     }
     /**
+     * The host attributes a component opts into accepting, via \`Define.Attrs\`.
+     *
+     * EMPTY in core — the platform fills it by augmentation, which is what keeps
+     * runtime-core free of any dependency on a renderer:
+     *
+     * @example
+     * \`\`\`ts
+     * // In @sigx/runtime-dom
+     * declare module '@sigx/runtime-core' {
+     *     interface ComponentAttributes {
+     *         id?: string;
+     *         onClick?: (e: MouseEvent) => void;
+     *         // …
+     *     }
+     * }
+     * \`\`\`
+     *
+     * Unlike {@link ComponentAttributeExtensions}, which widens *every* component,
+     * this is inert until a component intersects it into its own props type. A
+     * component that does not forward its leftover props should not advertise
+     * that it accepts them — a type that compiles and then silently drops the
+     * attribute is the failure mode this exists to prevent.
+     */
+    export interface ComponentAttributes {
+    }
+    /**
      * Namespace for component definition types.
      * Provides a discoverable API for defining props, events, models, slots, and exposed APIs.
      *
@@ -1620,6 +1641,41 @@ export const sigxModuleTypes = `declare module "sigx" {
      * \`\`\`
      */
     export declare namespace Define {
+    	/**
+    	 * Opt into accepting host attributes — \`id\`, \`class\`, \`style\`, \`title\`,
+    	 * \`data-*\`, \`aria-*\`, DOM event handlers and the rest of the universal
+    	 * set the platform declares on {@link ComponentAttributes}.
+    	 *
+    	 * Declare it only if the component actually forwards its leftover props
+    	 * to an element, or the type promises something the component drops:
+    	 *
+    	 * @example
+    	 * \`\`\`tsx
+    	 * type ButtonProps =
+    	 *     & Define.Prop<'variant', 'primary' | 'secondary'>
+    	 *     & Define.Attrs;
+    	 *
+    	 * const Button = component<ButtonProps>(ctx => {
+    	 *     const merged = mergeProps(() => {
+    	 *         const { variant: _v, ...rest } = ctx.props;
+    	 *         return rest;
+    	 *     }, () => ({ class: 'btn' }));
+    	 *     return () => <button {...merged}>…</button>;
+    	 * });
+    	 * \`\`\`
+    	 */
+    	type Attrs = ComponentAttributes;
+    	/**
+    	 * {@link Attrs} for a component that declares a prop of its own with the
+    	 * same name as a host attribute — the component's declaration wins.
+    	 *
+    	 * @example
+    	 * \`\`\`tsx
+    	 * // \`title\` here is a heading, not the HTML tooltip attribute.
+    	 * type DialogProps = Define.WithAttrs<Define.Prop<'title', string, true>>;
+    	 * \`\`\`
+    	 */
+    	type WithAttrs<TOwn> = TOwn & Omit<ComponentAttributes, keyof TOwn>;
     	/**
     	 * Define a single prop with type, required/optional status
     	 */
@@ -1851,6 +1907,16 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 * @internal Present only in dev builds; \`undefined\` in production.
     	 */
     	__hmrReload?(setup: SetupFn<any, any, any, any>): void;
+    	/**
+    	 * The \`ref\` the consumer put on this component's vnode. It is peeled out
+    	 * of props (see \`splitComponentProps\`) so a props spread cannot bind it a
+    	 * second time, and the renderer already delivers the \`expose()\` value to
+    	 * it — so a component has no reason to read this.
+    	 *
+    	 * @internal The one legitimate use is re-forwarding it to a component
+    	 * this one wraps and renders in its place, which is what \`lazy\` does.
+    	 */
+    	__forwardedRef?: any;
     }
     export type ViewFn = () => JSXElement | JSXElement[] | undefined;
     /**
@@ -2841,7 +2907,11 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 * extra state. Omitted ⇒ null + bubble to errorScope / app onError.
     	 */
     	error?: (e: Error, retry: () => void, stale: T | null) => R;
-    	/** The happy path — the only type-safe route to a non-null T. */
+    	/**
+    	 * The happy path. Reached when the cell HAS a value — which for a nullable
+    	 * \`T\` includes a legitimately \`null\` one, so this is "the value is
+    	 * present", not "the value is non-null" (#485).
+    	 */
     	ready: (v: T) => R;
     }
     /** Reactive — reads inside a render fn subscribe like any signal. */
@@ -2849,6 +2919,17 @@ export const sigxModuleTypes = `declare module "sigx" {
     	readonly state: AsyncStateName;
     	/** SWR last-good; kept across same-key refresh(), CLEARED on key change. */
     	readonly value: T | null;
+    	/**
+    	 * Whether \`value\` is a VALUE rather than "nothing yet" (#485).
+    	 *
+    	 * \`value !== null\` is not that question, and reading it as such is wrong
+    	 * for any nullable \`T\`: a fetch that legitimately resolves \`null\` — a
+    	 * "not found" read — looks identical to an unsettled cell. Prefer \`state\`
+    	 * (\`'ready'\`/\`'refreshing'\` ⇒ present) in templates; this is the direct
+    	 * form for engines and for code that holds a value it must not conflate
+    	 * with absence.
+    	 */
+    	readonly hasValue: boolean;
     	readonly error: Error | null;
     	/** state === 'pending' ONLY — "nothing to show yet". Refresh indicators read state === 'refreshing'. */
     	readonly loading: boolean;
@@ -2953,6 +3034,64 @@ export const sigxModuleTypes = `declare module "sigx" {
     export declare function useStream(key: string, source: () => AsyncIterable<string>): {
     	readonly value: string;
     };
+    /**
+     * Composing props from several sources.
+     *
+     * Forwarding a component's leftover props onto its root element is plain JS —
+     * \`const { color, ...rest } = ctx.props\` then \`<button {...rest} />\`. What
+     * plain JS cannot do is *combine* two sources: a JSX spread is lowered by the
+     * compiler into a single object literal before the runtime sees anything, so
+     * \`<button {...rest} {...bag} />\` lets later keys clobber earlier ones. If the
+     * consumer and the component both set \`class\`, one is lost; same for
+     * \`onClick\`; and \`onClick\` vs \`onclick\` land in the same DOM listener slot.
+     *
+     * No runtime change can recover what the compiler already discarded, which is
+     * why this one function exists.
+     */
+    /** A source of props: an object, a thunk returning one, or nothing. */
+    export type MergeSource = Record<string, any> | (() => Record<string, any>) | null | undefined;
+    /**
+     * Merge several prop sources into one.
+     *
+     * Ordinary keys follow **exact JS spread semantics**: the last source with the
+     * key as an own key wins, including when its value is an explicit \`undefined\`.
+     * This replaces a \`{...a, ...b}\` spread, so it must behave like one — it is
+     * deliberately *not* a defaults helper (destructuring with defaults already
+     * covers that).
+     *
+     * Four kinds of key are combined rather than overwritten:
+     *
+     * - **\`class\` / \`className\`** — concatenated in argument order, non-empty
+     *   values only, emitted as \`class\`.
+     * - **\`style\`** — merged left-to-right into an object; string sources are
+     *   parsed first. An object beats a string downstream: \`patchProp\` diffs it
+     *   per property and handles custom properties, and SSR stringifies it.
+     * - **\`on*\` handlers** — chained in source order, and grouped by the event
+     *   they resolve to, so \`onClick\` and \`onclick\` become **one** entry under the
+     *   first spelling seen. Two keys can then never reach the same invoker slot.
+     * - **\`ref\`** — chained into one ref that feeds every source's ref.
+     *
+     * Chaining cannot express *swallow*: a component that gates a consumer handler
+     * (dropping \`onClick\` while disabled) must keep destructuring it out and
+     * calling it itself.
+     *
+     * @example Hoist the call into setup — see the note on identity below.
+     * \`\`\`tsx
+     * const merged = mergeProps(
+     *     () => { const { variant: _v, ...rest } = ctx.props; return rest; },
+     *     () => ({ class: 'btn', onClick: onActivate })
+     * );
+     * return () => <button {...merged}>{slots.default?.()}</button>;
+     * \`\`\`
+     *
+     * The returned object resolves on read, so thunk sources stay reactive: a
+     * render that spreads it reads through to \`ctx.props\` and tracks as usual.
+     * Calling \`mergeProps\` **once in setup** also keeps the derived \`ref\` and
+     * chained handlers identity-stable across renders — rebuilding them per render
+     * hands the renderer a fresh function every time, which makes it tear down and
+     * re-apply refs for no reason.
+     */
+    export declare function mergeProps(...sources: MergeSource[]): Record<string, any>;
     /**
      * Component type checking utilities
      *
@@ -3207,6 +3346,202 @@ export const sigxModuleTypes = `declare module "sigx" {
      * \`\`\`
      */
     export declare const render: (element: JSXElement, container: Element | string, appContext?: AppContext) => void;
+    export type CSSNumericProperty = string | number;
+    export interface CSSProperties {
+    	position?: "static" | "relative" | "absolute" | "fixed" | "sticky" | (string & {});
+    	top?: CSSNumericProperty;
+    	right?: CSSNumericProperty;
+    	bottom?: CSSNumericProperty;
+    	left?: CSSNumericProperty;
+    	zIndex?: CSSNumericProperty;
+    	width?: CSSNumericProperty;
+    	height?: CSSNumericProperty;
+    	minWidth?: CSSNumericProperty;
+    	maxWidth?: CSSNumericProperty;
+    	minHeight?: CSSNumericProperty;
+    	maxHeight?: CSSNumericProperty;
+    	margin?: CSSNumericProperty;
+    	marginTop?: CSSNumericProperty;
+    	marginRight?: CSSNumericProperty;
+    	marginBottom?: CSSNumericProperty;
+    	marginLeft?: CSSNumericProperty;
+    	padding?: CSSNumericProperty;
+    	paddingTop?: CSSNumericProperty;
+    	paddingRight?: CSSNumericProperty;
+    	paddingBottom?: CSSNumericProperty;
+    	paddingLeft?: CSSNumericProperty;
+    	display?: string;
+    	flexDirection?: "row" | "row-reverse" | "column" | "column-reverse" | (string & {});
+    	flexWrap?: "nowrap" | "wrap" | "wrap-reverse" | (string & {});
+    	justifyContent?: string;
+    	alignItems?: string;
+    	alignContent?: string;
+    	alignSelf?: string;
+    	flex?: CSSNumericProperty;
+    	flexGrow?: CSSNumericProperty;
+    	flexShrink?: CSSNumericProperty;
+    	flexBasis?: CSSNumericProperty;
+    	order?: CSSNumericProperty;
+    	gap?: CSSNumericProperty;
+    	rowGap?: CSSNumericProperty;
+    	columnGap?: CSSNumericProperty;
+    	gridTemplateColumns?: string;
+    	gridTemplateRows?: string;
+    	gridColumn?: string;
+    	gridRow?: string;
+    	gridArea?: string;
+    	gridGap?: CSSNumericProperty;
+    	fontSize?: CSSNumericProperty;
+    	fontFamily?: string;
+    	fontWeight?: CSSNumericProperty;
+    	fontStyle?: string;
+    	lineHeight?: CSSNumericProperty;
+    	letterSpacing?: CSSNumericProperty;
+    	textAlign?: "left" | "center" | "right" | "justify" | (string & {});
+    	textDecoration?: string;
+    	textTransform?: string;
+    	whiteSpace?: string;
+    	wordBreak?: string;
+    	wordWrap?: string;
+    	overflowWrap?: string;
+    	color?: string;
+    	backgroundColor?: string;
+    	background?: string;
+    	backgroundImage?: string;
+    	backgroundSize?: string;
+    	backgroundPosition?: string;
+    	backgroundRepeat?: string;
+    	border?: string;
+    	borderWidth?: CSSNumericProperty;
+    	borderStyle?: string;
+    	borderColor?: string;
+    	borderRadius?: CSSNumericProperty;
+    	borderTop?: string;
+    	borderRight?: string;
+    	borderBottom?: string;
+    	borderLeft?: string;
+    	opacity?: CSSNumericProperty;
+    	visibility?: "visible" | "hidden" | "collapse" | (string & {});
+    	overflow?: "visible" | "hidden" | "scroll" | "auto" | (string & {});
+    	overflowX?: "visible" | "hidden" | "scroll" | "auto" | (string & {});
+    	overflowY?: "visible" | "hidden" | "scroll" | "auto" | (string & {});
+    	boxShadow?: string;
+    	textShadow?: string;
+    	transform?: string;
+    	transformOrigin?: string;
+    	transition?: string;
+    	transitionProperty?: string;
+    	transitionDuration?: string;
+    	transitionTimingFunction?: string;
+    	transitionDelay?: string;
+    	animation?: string;
+    	cursor?: string;
+    	pointerEvents?: "auto" | "none" | (string & {});
+    	userSelect?: "auto" | "none" | "text" | "all" | (string & {});
+    	objectFit?: "fill" | "contain" | "cover" | "none" | "scale-down" | (string & {});
+    	objectPosition?: string;
+    	aspectRatio?: CSSNumericProperty;
+    	placeItems?: string;
+    	placeContent?: string;
+    	placeSelf?: string;
+    	inset?: CSSNumericProperty;
+    	insetBlock?: CSSNumericProperty;
+    	insetInline?: CSSNumericProperty;
+    	containerType?: "normal" | "size" | "inline-size" | (string & {});
+    	containerName?: string;
+    	contain?: string;
+    	contentVisibility?: "visible" | "hidden" | "auto" | (string & {});
+    	backdropFilter?: string;
+    	clipPath?: string;
+    	filter?: string;
+    	maskImage?: string;
+    	maskSize?: string;
+    	maskPosition?: string;
+    	maskRepeat?: string;
+    	overscrollBehavior?: string;
+    	scrollSnapType?: string;
+    	scrollSnapAlign?: string;
+    	scrollBehavior?: "auto" | "smooth" | (string & {});
+    	scrollMargin?: CSSNumericProperty;
+    	scrollPadding?: CSSNumericProperty;
+    	textDecorationThickness?: CSSNumericProperty;
+    	textUnderlineOffset?: CSSNumericProperty;
+    	accentColor?: string;
+    	colorScheme?: string;
+    	[key: string]: CSSNumericProperty | undefined;
+    }
+    export interface ComponentAttributes {
+    	id?: string;
+    	class?: string;
+    	className?: string;
+    	style?: string | CSSProperties;
+    	title?: string;
+    	role?: string;
+    	tabIndex?: number;
+    	hidden?: boolean | "hidden" | "until-found" | "";
+    	inert?: boolean;
+    	popover?: "auto" | "manual" | "" | boolean;
+    	dir?: "ltr" | "rtl" | "auto";
+    	lang?: string;
+    	slot?: string;
+    	part?: string;
+    	draggable?: boolean | "true" | "false";
+    	spellCheck?: boolean | "true" | "false";
+    	translate?: "yes" | "no" | "";
+    	autoFocus?: boolean;
+    	autofocus?: boolean;
+    	accessKey?: string;
+    	contentEditable?: boolean | "true" | "false" | "inherit";
+    	enterKeyHint?: "enter" | "done" | "go" | "next" | "previous" | "search" | "send";
+    	inputMode?: "none" | "text" | "decimal" | "numeric" | "tel" | "search" | "email" | "url";
+    	[key: \`data-\${string}\`]: unknown;
+    	[key: \`aria-\${string}\`]: unknown;
+    	onClick?: (e: MouseEvent) => void;
+    	onDblClick?: (e: MouseEvent) => void;
+    	onContextMenu?: (e: MouseEvent) => void;
+    	onMouseDown?: (e: MouseEvent) => void;
+    	onMouseUp?: (e: MouseEvent) => void;
+    	onMouseEnter?: (e: MouseEvent) => void;
+    	onMouseLeave?: (e: MouseEvent) => void;
+    	onMouseMove?: (e: MouseEvent) => void;
+    	onMouseOver?: (e: MouseEvent) => void;
+    	onMouseOut?: (e: MouseEvent) => void;
+    	onPointerDown?: (e: PointerEvent) => void;
+    	onPointerUp?: (e: PointerEvent) => void;
+    	onPointerMove?: (e: PointerEvent) => void;
+    	onPointerEnter?: (e: PointerEvent) => void;
+    	onPointerLeave?: (e: PointerEvent) => void;
+    	onPointerCancel?: (e: PointerEvent) => void;
+    	onKeyDown?: (e: KeyboardEvent) => void;
+    	onKeyUp?: (e: KeyboardEvent) => void;
+    	onKeyPress?: (e: KeyboardEvent) => void;
+    	onFocus?: (e: FocusEvent) => void;
+    	onBlur?: (e: FocusEvent) => void;
+    	onFocusIn?: (e: FocusEvent) => void;
+    	onFocusOut?: (e: FocusEvent) => void;
+    	onInput?: (e: Event) => void;
+    	onChange?: (e: Event) => void;
+    	onSubmit?: (e: Event) => void;
+    	onReset?: (e: Event) => void;
+    	onTouchStart?: (e: TouchEvent) => void;
+    	onTouchEnd?: (e: TouchEvent) => void;
+    	onTouchMove?: (e: TouchEvent) => void;
+    	onTouchCancel?: (e: TouchEvent) => void;
+    	onWheel?: (e: WheelEvent) => void;
+    	onScroll?: (e: Event) => void;
+    	onDrag?: (e: DragEvent) => void;
+    	onDragStart?: (e: DragEvent) => void;
+    	onDragEnd?: (e: DragEvent) => void;
+    	onDragOver?: (e: DragEvent) => void;
+    	onDragEnter?: (e: DragEvent) => void;
+    	onDragLeave?: (e: DragEvent) => void;
+    	onDrop?: (e: DragEvent) => void;
+    	onAnimationStart?: (e: AnimationEvent) => void;
+    	onAnimationEnd?: (e: AnimationEvent) => void;
+    	onAnimationIteration?: (e: AnimationEvent) => void;
+    	onTransitionEnd?: (e: TransitionEvent) => void;
+    	onTransitionCancel?: (e: TransitionEvent) => void;
+    }
     /** DOM platform sets HTMLElement as the default element type */
     export interface PlatformTypes {
     	element: HTMLElement;

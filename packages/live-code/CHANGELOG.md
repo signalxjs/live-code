@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-31
+
+### Changed
+
+- **Aligned with SignalX core 0.14** ([#69](https://github.com/signalxjs/live-code/issues/69)). The pnpm catalog moves `sigx` and `@sigx/vite` to `^0.14.0`, and the tier-1 sibling peers follow the versions just published:
+  - `sigx`, `@sigx/vite` (catalog): `^0.13.0` → `^0.14.0`
+  - `@sigx/monaco-editor`: dev `^0.5.0` → `^0.6.0`, peer `>=0.5.0 <0.6.0` → `>=0.6.0 <0.7.0`
+  - `@sigx/router`: `>=0.10.0 <0.11.0` → `>=0.11.0 <0.12.0`
+  - `@sigx/store`: `>=0.10.0 <0.11.0` → `>=0.12.0 <0.13.0` (two minors — store shipped 0.11.0 in the previous cycle and 0.12.0 in this one)
+  - `@sigx/daisyui`: `>=0.10.0 <0.11.0` → `>=0.11.0 <0.12.0`
+
+  No source changes: the runtime binds only stable core primitives (`component`, `signal`, `onMounted`, `onUnmounted`, `render`).
+
+- **Regenerated the playground IntelliSense snapshot against core 0.14** ([#71](https://github.com/signalxjs/live-code/issues/71)). `src/types/generated-modules.ts` — the bundled type snapshot Monaco uses to typecheck playground snippets — now reflects the core 0.14 public surface. Without this the peer bump alone would ship 0.13-era completions against a 0.14 runtime: code that typechecks green in the editor and fails at runtime.
+
+  What moved, and why it matters in the playground:
+  - `mergeProps` and its `MergeSource` type are now offered.
+  - `Define.Attrs` / `Define.WithAttrs` and the `ComponentAttributes` interface appear, and `JSX.IntrinsicAttributes` correspondingly **loses** `id`, `class`, `style` and the `data-*` / `aria-*` index signatures — host attributes on a component are an opt-in in 0.14, so a snippet passing them to a component that never declared them is now correctly an error.
+  - `AsyncState` gains `hasValue`, and the `ready` arm is no longer described as the route to a non-null `T` (a nullable value legitimately reaches `ready`).
+
 ## [0.6.0] - 2026-07-23
 
 ### Changed

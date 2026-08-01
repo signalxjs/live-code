@@ -237,7 +237,9 @@ describe('progressive enhancement — teardown', () => {
         await enhanced();
 
         block.remove();
-        await settleQuiet();
+        // Detach teardown is observable — wait for it rather than guessing a
+        // duration, or the reattach below can race a detach still in flight.
+        await vi.waitFor(() => expect(offConsoleSpy).toHaveBeenCalled());
 
         document.body.appendChild(block);
         // Cleared from the observed set on detach → re-observed → re-run on reattach.

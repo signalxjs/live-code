@@ -91,9 +91,31 @@ function makeBlock(code: string, { tabs = ['preview', 'code'], live = true } = {
     return block;
 }
 
-/** Await MutationObserver delivery + the observer's 10ms debounce + async run. */
-function flush() {
+/**
+ * Wait for a fixed slice of time.
+ *
+ * Only for asserting that something *doesn't* happen — there is no condition to
+ * poll for an absence. Anything asserting that enhancement HAS happened must use
+ * `vi.waitFor` instead: MutationObserver delivery plus the observer's 10ms
+ * debounce plus the async run has no bounded duration, and guessing one is what
+ * made this suite flake on slower runners (#75).
+ */
+function settleQuiet() {
     return new Promise((resolve) => setTimeout(resolve, 50));
+}
+
+/**
+ * Resolve once the block has been enhanced and its preview run has started.
+ *
+ * Waits for the count to be *reached* rather than sleeping and hoping, then
+ * settles and re-asserts so the count is also not EXCEEDED — a duplicate run is
+ * the bug #34 was about, and `waitFor` alone would return the moment it first
+ * matched and never notice a second one.
+ */
+async function enhanced(times = 1) {
+    await vi.waitFor(() => expect(runCodeSpy).toHaveBeenCalledTimes(times));
+    await settleQuiet();
+    expect(runCodeSpy).toHaveBeenCalledTimes(times);
 }
 
 beforeAll(async () => {
@@ -117,9 +139,8 @@ beforeEach(() => {
 describe('progressive enhancement — run on view (#34)', () => {
     it('runs the preview code into the container when the block scrolls into view', async () => {
         document.body.appendChild(makeBlock('PREVIEW_CODE'));
-        await flush();
+        await enhanced();
 
-        expect(runCodeSpy).toHaveBeenCalledTimes(1);
         const [code, containerId] = runCodeSpy.mock.calls[0];
         expect(code).toBe('PREVIEW_CODE');
         expect(String(containerId)).toMatch(/^sigx-preview-test-\d+$/);
@@ -128,7 +149,7 @@ describe('progressive enhancement — run on view (#34)', () => {
     it('never wipes the SSR markup — the code stays in the HTML', async () => {
         const block = makeBlock('VISIBLE_CODE');
         document.body.appendChild(block);
-        await flush();
+        await enhanced();
 
         // The content pane and its highlighted code survive enhancement (SEO/AI).
         expect(block.querySelector('.code-window-content')).not.toBeNull();
@@ -142,7 +163,7 @@ describe('progressive enhancement — delegated interactions', () => {
     it('switches the visible pane when a tab is clicked', async () => {
         const block = makeBlock('CODE', { tabs: ['preview', 'code'] });
         document.body.appendChild(block);
-        await flush();
+        await enhanced();
 
         const codeTab = block.querySelector<HTMLElement>('.code-window-tab[data-tab="code"]')!;
         codeTab.click();
@@ -157,7 +178,7 @@ describe('progressive enhancement — delegated interactions', () => {
     it('opens the playground when the Try Live button is clicked', async () => {
         const block = makeBlock('EDIT_ME');
         document.body.appendChild(block);
-        await flush();
+        await enhanced();
 
         block.querySelector<HTMLElement>('.code-window-try-live')!.click();
 
@@ -170,7 +191,7 @@ describe('progressive enhancement — console rendering', () => {
     it('clamps an attacker-controlled log type before it reaches HTML', async () => {
         const block = makeBlock('CODE');
         document.body.appendChild(block);
-        await flush();
+        await enhanced();
 
         // Preview code can mutate window.__LIVE_CODE_CONSOLE__ with any `type`.
         consoleHolder.cb?.([{ type: '"><img src=x onerror=alert(1)>', args: ['hi'] }]);
@@ -188,7 +209,7 @@ describe('progressive enhancement — console rendering', () => {
     it('keeps a known log type on the rendered line', async () => {
         const block = makeBlock('CODE');
         document.body.appendChild(block);
-        await flush();
+        await enhanced();
 
         consoleHolder.cb?.([{ type: 'error', args: ['boom'] }]);
 
@@ -201,30 +222,26 @@ describe('progressive enhancement — teardown', () => {
     it('tears down a removed block so its console subscription does not leak', async () => {
         const block = makeBlock('GOODBYE');
         document.body.appendChild(block);
-        await flush();
-        expect(runCodeSpy).toHaveBeenCalled();
+        await enhanced();
 
         offConsoleSpy.mockClear();
         block.remove();
-        await flush();
 
         // The removed block's preview run was torn down (unsubscribed).
-        expect(offConsoleSpy).toHaveBeenCalled();
+        await vi.waitFor(() => expect(offConsoleSpy).toHaveBeenCalled());
     });
 
     it('re-observes and re-runs a block that is detached then re-attached', async () => {
         const block = makeBlock('REATTACH');
         document.body.appendChild(block);
-        await flush();
-        expect(runCodeSpy).toHaveBeenCalledTimes(1);
+        await enhanced();
 
         block.remove();
-        await flush();
+        await settleQuiet();
 
         document.body.appendChild(block);
-        await flush();
         // Cleared from the observed set on detach → re-observed → re-run on reattach.
-        expect(runCodeSpy).toHaveBeenCalledTimes(2);
+        await enhanced(2);
     });
 });
 
@@ -232,7 +249,7 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
     it('re-runs a reused block whose data-live-code is rewritten in place', async () => {
         const block = makeBlock('CODE_A');
         document.body.appendChild(block);
-        await flush();
+        await enhanced();
         expect(runCodeSpy.mock.calls.at(-1)?.[0]).toBe('CODE_A');
 
         // SPA nav: the reconciler reuses the element and rewrites its code attr;
@@ -247,8 +264,7 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
     it('re-runs a reused block whose preview container is swapped (same code)', async () => {
         const block = makeBlock('SAME_CODE');
         document.body.appendChild(block);
-        await flush();
-        expect(runCodeSpy).toHaveBeenCalledTimes(1);
+        await enhanced();
         const firstId = String(runCodeSpy.mock.calls[0][1]);
 
         // SPA nav reuses the element and its code but replaces the preview
@@ -261,11 +277,10 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
 
         // A navigation signal drives the re-sync (data-live-code didn't change).
         history.pushState({}, '', '/next');
-        await flush();
 
         // Stale run torn down (unsubscribed) and re-run into the new container.
+        await enhanced(2);
         expect(offConsoleSpy).toHaveBeenCalled();
-        expect(runCodeSpy).toHaveBeenCalledTimes(2);
         expect(String(runCodeSpy.mock.calls[1][1])).toBe(newId);
     });
 
@@ -274,7 +289,7 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
         // Markup not ready yet: the run container is missing.
         block.querySelector('.code-window-preview-container')!.remove();
         document.body.appendChild(block);
-        await flush();
+        await settleQuiet();
         expect(runCodeSpy).not.toHaveBeenCalled();
 
         // Container shows up, then a re-sync retries the block. Trigger the
@@ -299,7 +314,7 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
 
         const block = makeBlock('CODE_A');
         document.body.appendChild(block);
-        await flush(); // run 1 started; runCode(CODE_A) is pending
+        await enhanced(); // run 1 started; runCode(CODE_A) is pending
 
         // Rewrite the code + drive the re-sync via the SPA-nav hook (reliable),
         // then wait until run 2 (CODE_B) has actually started — so run 1 is
@@ -310,7 +325,7 @@ describe('progressive enhancement — SPA reuse (#31)', () => {
 
         const callsBefore = runCodeSpy.mock.calls.length;
         resolveFirst({ success: false, error: 'STALE_ERROR' }); // run 1 resolves late
-        await flush();
+        await settleQuiet();
 
         // Run 1's late resolution is ignored: no extra run, no stale error painted.
         expect(runCodeSpy.mock.calls.length).toBe(callsBefore);

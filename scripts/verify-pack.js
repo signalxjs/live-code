@@ -22,7 +22,7 @@
 
 import { execSync } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 
@@ -79,19 +79,29 @@ function packPackage(pkg) {
     console.log(`$ ${cmd}  (in ${pkg.path})`);
     const out = execSync(cmd, { cwd: pkg.path, encoding: 'utf-8' });
 
-    let result;
+    let parsed;
     try {
-        result = JSON.parse(out);
+        parsed = JSON.parse(out);
     } catch {
         throw new Error(`pnpm pack --json did not return JSON for ${pkg.name}:\n${out}`);
     }
-    if (!result.filename || !Array.isArray(result.files)) {
+
+    // pnpm emits one object per packed package; npm emits an array of them.
+    // Accept either so this doesn't break if pnpm aligns with npm later.
+    const result = Array.isArray(parsed) ? parsed[0] : parsed;
+    if (!result || !result.filename || !Array.isArray(result.files)) {
         throw new Error(
-            `pnpm pack --json returned an unexpected shape for ${pkg.name}: ${JSON.stringify(result)}`
+            `pnpm pack --json returned an unexpected shape for ${pkg.name}: ${JSON.stringify(parsed)}`
         );
     }
 
-    return { tarball: result.filename, entries: result.files.map((f) => f.path) };
+    // `filename` is absolute under --pack-destination on the pinned pnpm, but
+    // resolve it anyway so a bare basename would still land in the sandbox.
+    const tarball = isAbsolute(result.filename)
+        ? result.filename
+        : join(tarballDir, result.filename);
+
+    return { tarball, entries: result.files.map((f) => f.path) };
 }
 
 function collectExportPaths(exportsMap) {

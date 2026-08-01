@@ -61,25 +61,37 @@ function discoverPackages() {
     return found;
 }
 
+/**
+ * Pack the package and report what went into the tarball.
+ *
+ * `pnpm pack --json` gives us both halves — the tarball path and its entry
+ * list — so nothing here shells out to `tar`. That matters: GNU tar (the one
+ * Git Bash ships on Windows) reads a leading `C:` as a *remote host*, so
+ * `tar -tzf "C:\...\pkg.tgz"` fails with "Cannot connect to C: resolve
+ * failed". Asking the packer what it packed is both portable and more direct
+ * than re-reading the archive it just wrote.
+ *
+ * Paths come back already relative to the package root — `dist/index.js`, not
+ * `package/dist/index.js` — which is the form the checks below compare against.
+ */
 function packPackage(pkg) {
-    run('pnpm pack --pack-destination ' + JSON.stringify(tarballDir), { cwd: pkg.path });
-    const tarballs = readdirSync(tarballDir).filter((f) => f.endsWith('.tgz'));
-    const safeName = pkg.name.replace('@', '').replace('/', '-');
-    const match = tarballs.find((f) => f.startsWith(safeName));
-    if (!match) {
-        throw new Error(`Could not find tarball for ${pkg.name} in ${tarballDir}`);
-    }
-    return join(tarballDir, match);
-}
+    const cmd = 'pnpm pack --json --pack-destination ' + JSON.stringify(tarballDir);
+    console.log(`$ ${cmd}  (in ${pkg.path})`);
+    const out = execSync(cmd, { cwd: pkg.path, encoding: 'utf-8' });
 
-function listTarballEntries(tarball) {
-    const out = execSync(`tar -tzf ${JSON.stringify(tarball)}`, { encoding: 'utf-8' });
-    // Tarball entries are prefixed with "package/".
-    return out
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .map((l) => (l.startsWith('package/') ? l.slice('package/'.length) : l));
+    let result;
+    try {
+        result = JSON.parse(out);
+    } catch {
+        throw new Error(`pnpm pack --json did not return JSON for ${pkg.name}:\n${out}`);
+    }
+    if (!result.filename || !Array.isArray(result.files)) {
+        throw new Error(
+            `pnpm pack --json returned an unexpected shape for ${pkg.name}: ${JSON.stringify(result)}`
+        );
+    }
+
+    return { tarball: result.filename, entries: result.files.map((f) => f.path) };
 }
 
 function collectExportPaths(exportsMap) {
@@ -101,8 +113,8 @@ function collectExportPaths(exportsMap) {
 
 function verifyPackage(pkg) {
     step(`Pack ${pkg.name}@${pkg.version}`);
-    const tarball = packPackage(pkg);
-    const entries = new Set(listTarballEntries(tarball));
+    const { tarball, entries: entryList } = packPackage(pkg);
+    const entries = new Set(entryList);
     console.log(`   📦 ${tarball}  (${entries.size} entries)`);
 
     const errors = [];

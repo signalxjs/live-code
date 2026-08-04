@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-04
+
+### Changed
+
+- **Aligned with SignalX core 0.15** ([#77](https://github.com/signalxjs/live-code/issues/77)). The pnpm catalog moves `sigx` and `@sigx/vite` to `^0.15.0`, and the tier-1 sibling peers follow the versions just published (each one minor up):
+  - `sigx`, `@sigx/vite` (catalog): `^0.14.0` → `^0.15.0`
+  - `@sigx/monaco-editor`: dev `^0.6.0` → `^0.7.0`, peer `>=0.6.0 <0.7.0` → `>=0.7.0 <0.8.0`
+  - `@sigx/router`: `>=0.11.0 <0.12.0` → `>=0.12.0 <0.13.0`
+  - `@sigx/store`: `>=0.12.0 <0.13.0` → `>=0.13.0 <0.14.0`
+  - `@sigx/daisyui`: `>=0.11.0 <0.12.0` → `>=0.12.0 <0.13.0`
+
+  No source changes: the runtime binds only stable core primitives (`component`, `signal`, `onMounted`, `onUnmounted`, `render`).
+
+- **Regenerated the playground IntelliSense snapshot against core 0.15** ([#80](https://github.com/signalxjs/live-code/issues/80)). `src/types/generated-modules.ts` — the bundled type snapshot Monaco uses to typecheck playground snippets — now reflects the core 0.15 public surface.
+
+  What moved, and why it matters in the playground:
+  - `AsyncState` and `AsyncAction` become discriminated unions (`AsyncIdle` / `AsyncPending` / `AsyncReady` / `AsyncRefreshing` / `AsyncErrored`, plus the `ValuePresence` pair) — `if (x.hasValue) x.value` and `if (x.state === 'ready') x.value` now narrow to `T` in snippets instead of leaving `T | null`.
+  - The `error` match arm changed shape: `(e, retry, stale)` → `(e, ctx)` where `ctx` is `ErrorArmContext<T>` (`retry` plus the surviving last-good as `value`/`hasValue`). A snippet still destructuring the old positional `retry`/`stale` arguments is now correctly an error.
+  - Declared slots are enforced on both sides: a component's `children` is checked against its declared `default` slot (`SlotChildren` / `SlotContent` / `DefaultFill`), and a scoped slot's accessor requires its props — `slots.x?.()` on a scoped slot is a type error. The daisyui section's `children` prop types expand accordingly.
+  - `getCurrentInstance()` is typed (`ComponentSetupContext | null` instead of `any`), and server-fn stable keys read `<stableId>/<name>` (previously `#`-separated).
+
 ## [0.7.0] - 2026-07-31
 
 ### Changed

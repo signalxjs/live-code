@@ -4,7 +4,7 @@
  * Monaco Editor type definitions for SignalX packages.
  * Generated using dts-bundle-generator from actual source files.
  * 
- * Generated: 2026-07-31T18:15:06.275Z
+ * Generated: 2026-08-04T20:23:34.588Z
  * 
  * To regenerate: pnpm run generate:types
  */
@@ -1716,7 +1716,18 @@ export const sigxModuleTypes = `declare module "sigx" {
     		};
     	} & Define.Event<\`update:\${TNameOrType}\`, TType> : never;
     	/**
-    	 * Define a slot with optional scoped props.
+    	 * Define a slot, optionally with scoped props.
+    	 *
+    	 * The declaration is enforced on both sides. A fill supplied as children is
+    	 * checked against it — a fill expecting props the slot does not declare is
+    	 * an error, and an unannotated fill parameter is inferred from it — and the
+    	 * accessor requires the props to be passed: once a slot declares
+    	 * \`TProps\`, \`slots.x?.()\` is an error and \`slots.x?.(props)\` is the call.
+    	 *
+    	 * Scoped props are therefore all-or-nothing per slot; there is no "pass them
+    	 * or don't" form. A slot whose props are genuinely optional declares them as
+    	 * optional *members* and is called with an object:
+    	 * \`Define.Slot<'item', { index?: number }>\` → \`slots.item?.({})\`.
     	 *
     	 * @example
     	 * \`\`\`tsx
@@ -1775,18 +1786,82 @@ export const sigxModuleTypes = `declare module "sigx" {
     	__eventDetail: T;
     };
     /**
-     * Default slot function type
+     * Default slot function type — the shape of \`slots.default\` for a component
+     * that did NOT declare the slot, where nothing is known about scoped props.
      */
     export type DefaultSlot = () => JSXElement[];
     /**
+     * The declared \`default\` fill, or \`never\` if the component declares no
+     * \`default\` slot.
+     *
+     * Distributive on purpose. A props type can be a union — a discriminated union
+     * of prop shapes is the ordinary way to write one — and \`ExtractSlots\`'s
+     * conditional distributes, so \`TSlots\` arrives as a union too. \`keyof (A | B)\`
+     * is the INTERSECTION of their keys, so a plain \`'default' extends keyof TSlots\`
+     * reads as false whenever any member lacks the slot, and everything downstream
+     * silently relaxes: the untyped fallback comes back and \`children\` widens to
+     * \`any\`. Distributing first asks the question per member instead.
+     */
+    export type DefaultFill<TSlots> = NonNullable<TSlots> extends infer S ? S extends any ? "default" extends keyof S ? NonNullable<S["default"]> : never : never : never;
+    /**
      * Slots object passed to components. Every slot — \`default\` included — is a
-     * callable accessor only when the parent provided content for it; an
-     * unprovided slot reads as \`undefined\`, so check presence with
-     * \`slots.x?.()\` / \`slots.x?.() ?? fallback\`.
+     * callable accessor only when the parent provided content for it, and an
+     * unprovided slot reads as \`undefined\`. So presence is the accessor's own
+     * truthiness (\`if (slots.x)\`), and the call supplies whatever the slot
+     * declared: \`slots.x?.()\` for a slot without scoped props,
+     * \`slots.x?.(props) ?? fallback\` for one with them — on a scoped slot the bare
+     * \`slots.x?.()\` is a type error, which is the point.
+     *
+     * The untyped \`DefaultSlot\` fallback applies only when the component declared
+     * no \`default\` slot. Intersecting it unconditionally used to defeat the
+     * declaration: \`DefaultSlot & ((props: P) => …)\` is callable BOTH ways, so
+     * \`slots.default?.()\` compiled even on a slot whose props were declared, and
+     * the fill was handed nothing. That is precisely the call site a declaration
+     * exists to flag.
      */
     export type SlotsObject<TSlots = {}> = {
-    	default?: DefaultSlot;
-    } & TSlots;
+    	default?: [
+    		DefaultFill<TSlots>
+    	] extends [
+    		never
+    	] ? DefaultSlot : DefaultFill<TSlots>;
+    } & OmitDefault<NonNullable<TSlots>>;
+    /**
+     * \`Omit<T, 'default'>\` that survives a union. \`Omit\` is \`Pick<T, Exclude<keyof
+     * T, K>>\`, and \`keyof\` a union is the intersection of its members' keys, so a
+     * bare \`Omit\` over a union throws away every key the members do not share.
+     */
+    export type OmitDefault<T> = T extends any ? Omit<T, "default"> : never;
+    /**
+     * Slot content: what the renderer can turn into nodes, plus render-prop fills
+     * of exactly the shape \`TFill\` describes.
+     *
+     * \`TFill\` is threaded through the array case rather than applied only at the
+     * top, because the runtime lets a default slot mix element children with
+     * function children freely — and JSX collects multiple children into an array,
+     * so \`<C><span/>{(p) => …}</C>\` arrives as one array holding both.
+     */
+    export type SlotContent<TFill> = JSXElement | undefined | TFill | readonly SlotContent<TFill>[];
+    /**
+     * The \`children\` type for a component's JSX props.
+     *
+     * A component that declares a \`default\` slot gets its children checked against
+     * that declaration: ordinary content, or a render-prop fill matching the
+     * declared scoped props. So a fill destructuring props the slot never declares
+     * is an error, and a fill whose parameter disagrees with the declared props is
+     * an error — while a fill written with no annotation has its parameter type
+     * INFERRED from the declaration, which is the point.
+     *
+     * A component that declares no \`default\` slot keeps \`any\`. Narrowing there
+     * would be a guess: children are legal without a declaration (they land in the
+     * default slot at runtime either way), and there is nothing to check them
+     * against.
+     */
+    export type SlotChildren<TSlots> = [
+    	DefaultFill<TSlots>
+    ] extends [
+    	never
+    ] ? any : SlotContent<DefaultFill<TSlots>>;
     /**
      * Extract event names from an event definition
      */
@@ -2002,7 +2077,7 @@ export const sigxModuleTypes = `declare module "sigx" {
     } : {};
     export type ComponentFactory<TCombined extends Record<string, any>, TRef, TSlots> = ((props: StripForJSX<Omit<TCombined, EventNames<TCombined>>> & EventHandlers<TCombined> & SlotProps<TSlots> & SyncProps<TCombined> & ExternalModelProps<TCombined> & JSX.IntrinsicAttributes & ComponentAttributeExtensions & {
     	ref?: Ref<TRef>;
-    	children?: any;
+    	children?: SlotChildren<TSlots>;
     }) => JSXElement) & {
     	/** @internal Setup function for the renderer */
     	__setup: SetupFn<StripInternalMarkers<TCombined>, TCombined, TRef, TSlots>;
@@ -2051,7 +2126,7 @@ export const sigxModuleTypes = `declare module "sigx" {
      * }
      * \`\`\`
      */
-    export declare function getCurrentInstance(): any;
+    export declare function getCurrentInstance(): ComponentSetupContext<any, any, any, any, {}> | null;
     /**
      * Register a callback to run after the component is mounted to the DOM.
      * Must be called during component setup.
@@ -2872,15 +2947,15 @@ export const sigxModuleTypes = `declare module "sigx" {
     export type KeyValue = string | KeyTuple;
     /**
      * A server-fn reference usable AS a key (rfc-server §6.2, #452): any
-     * callable carrying the build-stamped stable key (\`<stableId>#<name>\`).
+     * callable carrying the build-stamped stable key (\`<stableId>/<name>\`).
      * Structural — runtime-core never imports \`@sigx/server\`; the brand is the
      * stamped property. As a key it canonicalizes to the key STRING in place
-     * (\`useData(getVotes)\` → \`'["<stableId>#getVotes"]'\`), so a mutation's
+     * (\`useData(getVotes)\` → \`'["<stableId>/getVotes"]'\`), so a mutation's
      * fn-ref \`invalidates\` pattern matches by tuple prefix.
      */
     export interface ServerFnDataRef<A extends KeyTuple = KeyTuple, R = unknown> {
     	(...args: A): R | Promise<R>;
-    	/** Build-stamped stable key (\`<stableId>#<name>\`). */
+    	/** Build-stamped stable key (\`<stableId>/<name>\`). */
     	__sigxKey: string;
     }
     export interface AsyncFetcherContext {
@@ -2896,17 +2971,41 @@ export const sigxModuleTypes = `declare module "sigx" {
     /** One fetcher shape everywhere: (trigger's argument, ctx). */
     export type Fetcher<T, Arg> = (arg: Arg, ctx: AsyncFetcherContext) => Promise<T>;
     export type AsyncStateName = "idle" | "pending" | "ready" | "refreshing" | "errored";
+    /**
+     * The presence pair: \`hasValue\` is the discriminant that makes \`value\` a \`T\`.
+     *
+     * \`value !== null\` cannot answer "is there a value?" for a nullable \`T\` — a
+     * fetch that legitimately resolves \`null\` (a "not found" read) is a VALUE
+     * (#485). \`if (x.hasValue) x.value // T\` is the type-safe form of that
+     * question, everywhere this pair appears.
+     */
+    export type ValuePresence<T> = {
+    	readonly value: T;
+    	readonly hasValue: true;
+    } | {
+    	readonly value: null;
+    	readonly hasValue: false;
+    };
+    /**
+     * Second parameter of the \`error\` arm. \`value\`/\`hasValue\` are the surviving
+     * last-good (the same thing the state's own \`value\` holds during \`'errored'\`)
+     * — a legitimately-null last-good has \`hasValue: true\`.
+     */
+    export type ErrorArmContext<T> = {
+    	readonly retry: () => void;
+    } & ValuePresence<T>;
     export interface MatchArms<T, R> {
     	/** Conditional fetch not started ("Type to search…"). Defaults to \`pending\`. */
     	idle?: () => R;
     	/** Nothing to show yet. Omitted ⇒ renders nothing while pending. */
     	pending?: () => R;
     	/**
-    	 * Fetch failed. \`stale\` is the last-good value (survives internally even
-    	 * though top-level \`value\` is nulled) — "keep content + toast" needs no
-    	 * extra state. Omitted ⇒ null + bubble to errorScope / app onError.
+    	 * Fetch failed. "Keep content + toast" reads \`ctx.value\`/\`ctx.hasValue\`
+    	 * (the surviving last-good); the common case destructures just
+    	 * \`(e, { retry })\`. Omitted ⇒ undefined + bubble to errorScope / app
+    	 * onError.
     	 */
-    	error?: (e: Error, retry: () => void, stale: T | null) => R;
+    	error?: (e: Error, ctx: ErrorArmContext<T>) => R;
     	/**
     	 * The happy path. Reached when the cell HAS a value — which for a nullable
     	 * \`T\` includes a legitimately \`null\` one, so this is "the value is
@@ -2914,29 +3013,67 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 */
     	ready: (v: T) => R;
     }
-    /** Reactive — reads inside a render fn subscribe like any signal. */
-    export interface AsyncState<T> {
-    	readonly state: AsyncStateName;
-    	/** SWR last-good; kept across same-key refresh(), CLEARED on key change. */
-    	readonly value: T | null;
-    	/**
-    	 * Whether \`value\` is a VALUE rather than "nothing yet" (#485).
-    	 *
-    	 * \`value !== null\` is not that question, and reading it as such is wrong
-    	 * for any nullable \`T\`: a fetch that legitimately resolves \`null\` — a
-    	 * "not found" read — looks identical to an unsettled cell. Prefer \`state\`
-    	 * (\`'ready'\`/\`'refreshing'\` ⇒ present) in templates; this is the direct
-    	 * form for engines and for code that holds a value it must not conflate
-    	 * with absence.
-    	 */
-    	readonly hasValue: boolean;
-    	readonly error: Error | null;
-    	/** state === 'pending' ONLY — "nothing to show yet". Refresh indicators read state === 'refreshing'. */
-    	readonly loading: boolean;
+    /** Methods shared by every {@link AsyncState} member. */
+    export interface AsyncStateBase<T> {
     	match<R>(arms: MatchArms<T, R>): R | undefined;
     	/** Re-run in place. NEVER rejects — failures land on \`.error\`. */
     	refresh(): Promise<void>;
     }
+    export interface AsyncIdle<T> extends AsyncStateBase<T> {
+    	readonly state: "idle";
+    	readonly value: null;
+    	readonly hasValue: false;
+    	readonly error: null;
+    	readonly loading: false;
+    }
+    export interface AsyncPending<T> extends AsyncStateBase<T> {
+    	readonly state: "pending";
+    	readonly value: null;
+    	readonly hasValue: false;
+    	readonly error: null;
+    	readonly loading: true;
+    }
+    export interface AsyncReady<T> extends AsyncStateBase<T> {
+    	readonly state: "ready";
+    	readonly value: T;
+    	readonly hasValue: true;
+    	readonly error: null;
+    	readonly loading: false;
+    }
+    export interface AsyncRefreshing<T> extends AsyncStateBase<T> {
+    	readonly state: "refreshing";
+    	readonly value: T;
+    	readonly hasValue: true;
+    	readonly error: null;
+    	readonly loading: false;
+    }
+    /**
+     * SWR-through-error: the last-good value survives a failed same-key fetch, so
+     * this member genuinely splits on presence — \`hasValue: true\` after a failed
+     * refresh of settled data, \`false\` when the cell never succeeded.
+     */
+    export type AsyncErrored<T> = AsyncStateBase<T> & {
+    	readonly state: "errored";
+    	readonly error: Error;
+    	readonly loading: false;
+    } & ValuePresence<T>;
+    /**
+     * Reactive — reads inside a render fn subscribe like any signal.
+     *
+     * A discriminated union over one STABLE object: \`if (x.hasValue) x.value // T\`
+     * and \`if (x.state === 'ready') x.value // T\` both narrow. Narrowing is a
+     * per-read snapshot — the underlying state moves on, so re-check after an
+     * \`await\` (render fns re-run and re-narrow on every change; this only matters
+     * in event handlers and async code).
+     *
+     * Invariants every producer upholds: \`value\` is the SWR last-good — kept
+     * across same-key refresh() AND across a failed fetch, CLEARED on key
+     * change; \`loading\` is \`state === 'pending'\` ONLY ("nothing to show yet" —
+     * refresh indicators read \`'refreshing'\`). The state/presence/error
+     * combinations are additionally dev-checked in \`matchAsyncState\`; \`loading\`
+     * is not (derive it from the state name and it cannot lie).
+     */
+    export type AsyncState<T> = AsyncIdle<T> | AsyncPending<T> | AsyncReady<T> | AsyncRefreshing<T> | AsyncErrored<T>;
     /**
      * OPEN interface — contains only options core actually reads. A pack
      * augments it (\`declare module …\`) so its options exist in the editor
@@ -2953,7 +3090,7 @@ export const sigxModuleTypes = `declare module "sigx" {
     	server?: boolean;
     }
     /** Server-fn key (#452): data identity IS the fn — canonical key
-     *  \`'["<stableId>#<name>"]'\`, default fetcher \`() => fn()\`. */
+     *  \`'["<stableId>/<name>"]'\`, default fetcher \`() => fn()\`. */
     export declare function useData<R>(fn: ServerFnDataRef<[
     ], R>, opts?: AsyncOptions): AsyncState<Awaited<R>>;
     /** Reactive server-fn tuple key: \`() => [fn, ...args]\`; falsy ⇒ idle.
@@ -2980,13 +3117,8 @@ export const sigxModuleTypes = `declare module "sigx" {
     /** OPEN interface — deliberately empty in core; packs augment it. */
     export interface ActionOptions {
     }
-    export interface AsyncAction<T, In> {
-    	readonly state: "idle" | "pending" | "ready" | "errored";
-    	/** Last successful result (a search box renders from this). */
-    	readonly value: T | null;
-    	readonly error: Error | null;
-    	/** state === 'pending' — the blessed double-submit guard: disabled={a.loading}. */
-    	readonly loading: boolean;
+    /** Methods shared by every {@link AsyncAction} member. */
+    export interface AsyncActionBase<T, In> {
     	match<R>(arms: MatchArms<T, R>): R | undefined;
     	/**
     	 * Trigger. Never rejects; in-flight runs are never aborted.
@@ -3001,11 +3133,45 @@ export const sigxModuleTypes = `declare module "sigx" {
     	 */
     	reset(): void;
     }
+    /**
+     * A discriminated union like {@link AsyncState} (same narrowing:
+     * \`if (a.hasValue) a.value // T\`), with action-specific semantics — no
+     * 'refreshing'; \`value\` is the LAST SUCCESSFUL result and survives both a
+     * re-run ('pending' — a search box renders from it) and a failure
+     * ('errored' — SWR-through-error); \`loading\` is the blessed double-submit
+     * guard: disabled={a.loading}. Only \`reset()\` clears the value.
+     */
+    export type AsyncAction<T, In> = AsyncActionBase<T, In> & ({
+    	readonly state: "idle";
+    	readonly value: null;
+    	readonly hasValue: false;
+    	readonly error: null;
+    	readonly loading: false;
+    } | ({
+    	readonly state: "pending";
+    	readonly error: null;
+    	readonly loading: true;
+    } & ValuePresence<T>) | {
+    	readonly state: "ready";
+    	readonly value: T;
+    	readonly hasValue: true;
+    	readonly error: null;
+    	readonly loading: false;
+    } | ({
+    	readonly state: "errored";
+    	readonly error: Error;
+    	readonly loading: false;
+    } & ValuePresence<T>));
     export declare function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions): AsyncAction<T, In>;
-    export interface AllState<T, E> extends AsyncState<T> {
+    /**
+     * An intersection, not an interface — \`AsyncState\` is a union, and
+     * intersecting distributes over its members so discriminant narrowing
+     * (\`if (x.hasValue) x.value // T\`) works through the combination too.
+     */
+    export type AllState<T, E> = AsyncState<T> & {
     	/** Collect-all counterpart to first-error-wins \`.error\`. */
     	readonly errors: E;
-    }
+    };
     export type ValuesOf<S> = {
     	[K in keyof S]: S[K] extends AsyncState<infer V> ? V : never;
     };
@@ -4583,7 +4749,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	model?: import("sigx").Model<ThemeConfigData> | import("sigx").ModelBinding<ThemeConfigData> | (() => ThemeConfigData) | undefined;
     } & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		model?: import("sigx").Model<ThemeConfigData> | undefined;
@@ -4811,7 +4977,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	model?: import("sigx").Model<string> | import("sigx").ModelBinding<string> | (() => string) | undefined;
     } & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		model?: import("sigx").Model<string> | undefined;
@@ -4869,7 +5035,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		class?: string | undefined;
@@ -5062,7 +5228,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		background?: BackgroundColor | undefined;
@@ -5202,7 +5368,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		background?: BackgroundColor | undefined;
@@ -5290,7 +5456,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		background?: BackgroundColor | undefined;
@@ -5365,7 +5531,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		class?: string | undefined;
@@ -5513,7 +5679,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		center?: boolean | undefined;
@@ -5620,7 +5786,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	model?: import("sigx").Model<boolean> | import("sigx").ModelBinding<boolean> | (() => boolean) | undefined;
     } & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		model?: import("sigx").Model<boolean> | undefined;
@@ -5754,7 +5920,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		class?: string | undefined;
@@ -5828,7 +5994,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	"model:activeId"?: import("sigx").Model<string> | import("sigx").ModelBinding<string> | (() => string) | undefined;
     } & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		activeId?: import("sigx").Model<string> | undefined;
@@ -5973,7 +6139,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	model?: import("sigx").Model<string> | import("sigx").ModelBinding<string> | (() => string) | undefined;
     } & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		model?: import("sigx").Model<string> | undefined;
@@ -6024,7 +6190,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		class?: string | undefined;
@@ -6157,7 +6323,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		class?: string | undefined;
@@ -6205,7 +6371,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	model?: import("sigx").Model<boolean> | import("sigx").ModelBinding<boolean> | (() => boolean) | undefined;
     } & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		model?: import("sigx").Model<boolean> | undefined;
@@ -6256,7 +6422,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		class?: string | undefined;
@@ -6350,7 +6516,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	model?: import("sigx").Model<string> | import("sigx").ModelBinding<string> | (() => string) | undefined;
     } & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		model?: import("sigx").Model<string> | undefined;
@@ -6539,7 +6705,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		class?: string | undefined;
@@ -6666,7 +6832,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     	}> | undefined;
     } & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     	ref?: import("sigx").Ref<void> | undefined;
-    	children?: any;
+    	children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     }) => import("sigx").JSXElement) & {
     	__setup: import("sigx").SetupFn<{
     		background?: BackgroundColor | undefined;
@@ -6710,7 +6876,7 @@ export const daisyuiModuleTypes = `declare module "@sigx/daisyui" {
     		}> | undefined;
     	} & {} & JSX.IntrinsicAttributes & import("sigx").ComponentAttributeExtensions & {
     		ref?: import("sigx").Ref<void> | undefined;
-    		children?: any;
+    		children?: readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (readonly (/*elided*/ any | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined)[] | (() => import("sigx").JSXElement | import("sigx").JSXElement[] | null) | import("sigx").JSXElement | undefined;
     	}) => import("sigx").JSXElement) & {
     		__setup: import("sigx").SetupFn<{
     			class?: string | undefined;

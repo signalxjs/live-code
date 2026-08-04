@@ -50,6 +50,8 @@ class ImmediateIntersectionObserver {
         this.cb = cb;
     }
     observe(el: Element) {
+        // eslint-disable-next-line no-console
+        console.log('[dbg] IO.observe fired for', (el as HTMLElement).querySelector('.code-window-preview-container')?.id);
         this.cb([{ target: el, isIntersecting: true } as IntersectionObserverEntry], this as any);
     }
     unobserve() {}
@@ -128,7 +130,9 @@ beforeAll(async () => {
     await import('../client');
 });
 
-beforeEach(() => {
+beforeEach((ctx) => {
+    // eslint-disable-next-line no-console
+    console.log('[dbg] ===== test:', ctx.task.name);
     runCodeSpy.mockReset();
     runCodeSpy.mockResolvedValue({ success: true });
     openPlaygroundSpy.mockReset();

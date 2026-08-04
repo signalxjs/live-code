@@ -201,6 +201,8 @@ function teardownPreview(block: HTMLElement) {
 function runPreview(block: HTMLElement): boolean {
     const container = block.querySelector<HTMLElement>('.code-window-preview-container');
     const codeBase64 = blockCode(block);
+    // eslint-disable-next-line no-console
+    console.log('[dbg] runPreview: container=', !!container, 'id=', container?.id, 'code=', !!codeBase64);
     if (!container || !container.id || !codeBase64) return false;
     const containerId = container.id;
 
@@ -288,6 +290,8 @@ function getPreviewObserver(): IntersectionObserver {
 /** Attach the run-on-view observer to any not-yet-observed blocks. */
 function enhancePreviewBlocks() {
     const blocks = document.querySelectorAll<HTMLElement>('[data-live-preview]');
+    // eslint-disable-next-line no-console
+    console.log('[dbg] enhancePreviewBlocks: blocks=', blocks.length, 'IO=', typeof IntersectionObserver);
 
     // Where IntersectionObserver is unavailable (older engines, some test/SSR
     // shims), don't crash all of live-code — just run every preview eagerly.
@@ -477,6 +481,8 @@ if (typeof document !== 'undefined') {
 
     let pendingCodeChange = false;
     const domObserver = new MutationObserver((mutations) => {
+        // eslint-disable-next-line no-console
+        console.log('[dbg] MO fired:', mutations.map((m) => m.type).join(','));
         let structuralChange = false;
         for (const mutation of mutations) {
             if (mutation.type === 'attributes') {
@@ -500,9 +506,14 @@ if (typeof document !== 'undefined') {
         if (structuralChange || pendingCodeChange) {
             clearTimeout((domObserver as any)._timeout);
             (domObserver as any)._timeout = setTimeout(() => {
+                // eslint-disable-next-line no-console
+                console.log('[dbg] debounced resync firing');
                 pendingCodeChange = false;
                 resyncPreviews();
             }, 10);
+        } else {
+            // eslint-disable-next-line no-console
+            console.log('[dbg] MO batch ignored (no relevant change)');
         }
     });
 

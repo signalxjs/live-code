@@ -4,7 +4,7 @@
  * Monaco Editor type definitions for SignalX packages.
  * Generated using dts-bundle-generator from actual source files.
  * 
- * Generated: 2026-09-18T19:17:24.634Z
+ * Generated: 2026-09-18T19:26:47.138Z
  * 
  * To regenerate: pnpm run generate:types
  */
@@ -1001,8 +1001,6 @@ export const jsxAmbientTypes = sigxTypes;
 
 /** sigx module types */
 export const sigxModuleTypes = `declare module "sigx" {
-    import { TypeHandler } from '@sigx/serialize';
-
     /**
      * Platform-specific hooks for runtime-core.
      *
@@ -3311,6 +3309,61 @@ export const sigxModuleTypes = `declare module "sigx" {
      * both halves — this function is the blob half only.
      */
     export declare function invalidateRestored(key: string): void;
+    /**
+     * The vocabulary both walks share.
+     *
+     * \`@sigx/serialize\` emits its JSON two ways — \`encodeWithHandlers\` builds a
+     * JSON-safe TREE (\`./index.ts\`), \`stringifyWithHandlers\` emits the STRING in
+     * one pass (\`./stringify.ts\`) — and they must agree byte for byte. Anything
+     * that would drift if it existed twice lives here, defined once: the handler
+     * shape, the built-in tags, the escape marker, the depth ceiling, the
+     * \`__proto__\` key, and the dev-only unencodable probe.
+     *
+     * Not in the exports map. It is an internal module, hoisted by the bundler
+     * into a chunk both entries import; consumers reach every public name through
+     * \`@sigx/serialize\` (which re-exports \`TypeHandler\` and
+     * \`BUILTIN_TYPE_HANDLERS\`) or \`@sigx/serialize/stringify\`.
+     */
+    /**
+     * One pluggable codec entry for a type JSON cannot represent.
+     *
+     * Generic over the handled type and its wire form — author handlers with
+     * \`defineTypeHandler\` to get both inferred from the \`test\` guard. The
+     * members are METHOD-declared on purpose: strictFunctionTypes exempts method
+     * declarations from contravariant parameter checks, which is what lets a
+     * \`TypeHandler<Date, number>\` flow into the \`readonly TypeHandler[]\` chains
+     * every consumer takes. Bare \`TypeHandler\` (= \`TypeHandler<unknown, unknown>\`)
+     * is exactly the pre-generic shape, so existing handlers compile unchanged.
+     */
+    export interface TypeHandler<T = unknown, Encoded = unknown> {
+    	/** Identifies the handler (dev warnings, dedupe by consumers). */
+    	name: string;
+    	/**
+    	 * Wire discriminator, e.g. \`'\$date'\`. Encoded values take the single-key
+    	 * form \`{ [tag]: payload }\` — that shape is what lets the revive half
+    	 * find them again.
+    	 *
+    	 * Optional only for backward compatibility with serialize-only handlers
+    	 * written before the revive half existed; such a handler's output is
+    	 * emitted as-is and never revived.
+    	 */
+    	tag?: string;
+    	/**
+    	 * Whether this handler owns the value. Receives the RAW value (before any
+    	 * toJSON). Deliberately \`boolean\`, not a type predicate — a predicate
+    	 * member would reject every boolean-returning test; the predicate lives on
+    	 * \`defineTypeHandler\`'s parameter, where it drives inference.
+    	 */
+    	test(value: unknown): boolean;
+    	/**
+    	 * Return a JSON-safe payload. The result is wrapped as \`{ [tag]: payload }\`
+    	 * when \`tag\` is set, and is itself walked — so a handler may return values
+    	 * other handlers own (a \`Map\`'s entries containing \`Date\`s, say).
+    	 */
+    	serialize(value: T): Encoded;
+    	/** Turn a payload produced by \`serialize\` back into the live value. */
+    	revive?(encoded: Encoded): T;
+    }
     /**
      * Component type checking utilities
      *

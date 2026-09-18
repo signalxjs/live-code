@@ -79,7 +79,11 @@ const MODULES: ModuleConfig[] = [
         entryPoint: resolvePackageTypes('sigx'),
         globalVar: '__SIGX__',
         // sigx's index.d.ts is just re-exports from these subpackages.
-        extraInlines: ['@sigx/reactivity', '@sigx/runtime-core', '@sigx/runtime-dom'],
+        // @sigx/serialize is not re-exported, but runtime-core's 1.0 surface
+        // references its `TypeHandler` (provideTypeHandlers); leaving it external
+        // puts a bare `import … from '@sigx/serialize'` inside the blob, which
+        // Monaco cannot resolve (no extra-lib is registered for it).
+        extraInlines: ['@sigx/reactivity', '@sigx/runtime-core', '@sigx/runtime-dom', '@sigx/serialize'],
     },
     {
         name: '@sigx/router',

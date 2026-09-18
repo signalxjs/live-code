@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **Regenerated the playground IntelliSense snapshot against core 1.0** ([#83](https://github.com/signalxjs/live-code/issues/83)). `src/types/generated-modules.ts` — the bundled type snapshot Monaco uses to typecheck playground snippets — now reflects the core 1.0 public surface: the `PropsOf` / `SlotsOf` / `RefOf` / `CombinedOf` component-factory helpers, `KeyJson` (nested `KeyTuple` keys), `peekRestored` / `invalidateRestored` for the restored-state seam, and `provideTypeHandlers` for the boundary codec registry.
 
+  `@sigx/serialize` is now inlined into the `sigx` blob as well: core 1.0's `provideTypeHandlers` references its `TypeHandler`, and left external it became a bare `import … from '@sigx/serialize'` inside the snapshot that Monaco could not resolve.
+
 ## [0.8.0] - 2026-08-04
 
 ### Changed

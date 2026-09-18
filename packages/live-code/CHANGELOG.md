@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Aligned with SignalX core 1.0** ([#83](https://github.com/signalxjs/live-code/issues/83)). The pnpm catalog moves `sigx` and `@sigx/vite` to `^1.0.0`, and the tier-1 sibling peers follow the versions just published (each one minor up):
+  - `sigx`, `@sigx/vite` (catalog): `^0.15.0` → `^1.0.0`
+  - `@sigx/monaco-editor`: dev `^0.7.0` → `^0.8.0`, peer `>=0.7.0 <0.8.0` → `>=0.8.0 <0.9.0`
+  - `@sigx/router`: `>=0.12.0 <0.13.0` → `>=0.13.0 <0.14.0`
+  - `@sigx/store`: `>=0.13.0 <0.14.0` → `>=0.14.0 <0.15.0`
+  - `@sigx/daisyui`: `>=0.12.0 <0.13.0` → `>=0.13.0 <0.14.0`
+
+  No runtime source changes: the runtime binds only stable core primitives (`component`, `signal`, `onMounted`, `onUnmounted`, `render`), and build, typecheck and the unit suite passed unchanged against 1.0.
+
+- **Regenerated the playground IntelliSense snapshot against core 1.0** ([#83](https://github.com/signalxjs/live-code/issues/83)). `src/types/generated-modules.ts` — the bundled type snapshot Monaco uses to typecheck playground snippets — now reflects the core 1.0 public surface: the `PropsOf` / `SlotsOf` / `RefOf` / `CombinedOf` component-factory helpers, `KeyJson` (nested `KeyTuple` keys), `peekRestored` / `invalidateRestored` for the restored-state seam, and `provideTypeHandlers` for the boundary codec registry.
+
+  `@sigx/serialize` is now inlined into the `sigx` blob as well: core 1.0's `provideTypeHandlers` references its `TypeHandler`, and left external it became a bare `import … from '@sigx/serialize'` inside the snapshot that Monaco could not resolve.
+
 ## [0.8.0] - 2026-08-04
 
 ### Changed

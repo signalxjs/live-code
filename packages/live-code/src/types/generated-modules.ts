@@ -4,7 +4,7 @@
  * Monaco Editor type definitions for SignalX packages.
  * Generated using dts-bundle-generator from actual source files.
  * 
- * Generated: 2026-08-04T20:23:34.588Z
+ * Generated: 2026-09-18T19:17:24.634Z
  * 
  * To regenerate: pnpm run generate:types
  */
@@ -823,9 +823,7 @@ declare namespace JSX {
     interface ElementAttributesProperty { props: {}; }
     interface ElementChildrenAttribute { children: {}; }
 
-    interface IntrinsicAttributes {
-        key?: string | number | null;
-    }
+    
 
     interface IntrinsicElements {
         a: HTMLAttributes<HTMLAnchorElement>;
@@ -1003,6 +1001,8 @@ export const jsxAmbientTypes = sigxTypes;
 
 /** sigx module types */
 export const sigxModuleTypes = `declare module "sigx" {
+    import { TypeHandler } from '@sigx/serialize';
+
     /**
      * Platform-specific hooks for runtime-core.
      *
@@ -2112,6 +2112,40 @@ export const sigxModuleTypes = `declare module "sigx" {
     	__slots: any;
     };
     /**
+     * The whole declaration a factory was built from — its \`TCombined\`
+     * parameter, i.e. what \`component<T>()\` was given: props and events together
+     * with the slot, expose and model markers. Re-parameterize it to derive one
+     * factory type from another (#535):
+     *
+     * @example
+     * \`\`\`ts
+     * type Adapted<F extends AnyComponentFactory, TRemove extends string, TAdd> =
+     *     ComponentFactory<Omit<CombinedOf<F>, TRemove> & TAdd, RefOf<F>, SlotsOf<F>>;
+     * \`\`\`
+     *
+     * These aliases are the supported way to take a \`ComponentFactory\` apart;
+     * the \`__props\`/\`__events\`/\`__ref\`/\`__slots\` brands they read are \`@internal\`
+     * and may be renamed without notice.
+     */
+    export type CombinedOf<F extends AnyComponentFactory> = F["__events"];
+    /**
+     * The props view of a factory — {@link CombinedOf} with the internal markers
+     * (\`__exposed\`, \`__slots\`, model bindings, \`update:*\`) stripped, i.e. the
+     * shape its setup's \`ctx.props\` is typed with. See {@link CombinedOf}.
+     */
+    export type PropsOf<F extends AnyComponentFactory> = F["__props"];
+    /**
+     * The \`TRef\` parameter of a factory — what \`expose()\` hands to a \`ref\`.
+     * The same read as {@link Exposed}; provided under this name so the family
+     * reads uniformly beside {@link CombinedOf} and {@link SlotsOf}.
+     */
+    export type RefOf<F extends AnyComponentFactory> = F["__ref"];
+    /**
+     * The \`TSlots\` parameter of a factory — the slot table its \`Define.Slot\`
+     * declarations produced. See {@link CombinedOf}.
+     */
+    export type SlotsOf<F extends AnyComponentFactory> = F["__slots"];
+    /**
      * Returns the setup context of the currently executing component, or \`null\` if called outside setup.
      *
      * Use this to access the component context (props, emit, etc.) from composable functions
@@ -2933,17 +2967,27 @@ export const sigxModuleTypes = `declare module "sigx" {
      * Key canonicalization + dev guards for \`useData\`.
      *
      * A key does three jobs at once — reactive trigger, cache/SSR identity, and
-     * fetcher input — so identity must be canonical: tuples serialize to JSON
-     * (\`['user', 7]\` → \`'["user",7]"\`), which also keeps them disjoint from
-     * plain string keys used by other producers in the shared SSR blob (a
-     * canonical tuple always starts with \`[\`).
+     * fetcher input — so identity must be canonical: tuples serialize to
+     * CANONICAL JSON (\`['user', 7]\` → \`'["user",7]"\`; an object element's keys
+     * are sorted, so \`{ b: 1, a: 2 }\` and \`{ a: 2, b: 1 }\` are one key — #694),
+     * which also keeps them disjoint from plain string keys used by other
+     * producers in the shared SSR blob (a canonical tuple always starts with \`[\`).
      *
      * Pure module: no web globals, no blob access (that lives in ./restore.ts).
      */
     /** All skip values — including '' so \`str && tuple\` getters type cleanly. */
     export type Falsy = null | undefined | false | "";
-    /** Tuple elements are JSON primitives only — identity is canonical JSON. */
-    export type KeyTuple = readonly (string | number | boolean | null)[];
+    /**
+     * What a tuple element may be (#694): a JSON primitive, an array of these,
+     * or a PLAIN object of these (object keys are sorted for identity, so
+     * property order never matters). Not a class instance, \`Date\`, \`Map\` —
+     * identity is canonical JSON, and those have none.
+     */
+    export type KeyJson = string | number | boolean | null | readonly KeyJson[] | {
+    	readonly [key: string]: KeyJson;
+    };
+    /** Tuple elements are JSON values — identity is canonical (key-sorted) JSON. */
+    export type KeyTuple = readonly KeyJson[];
     export type KeyValue = string | KeyTuple;
     /**
      * A server-fn reference usable AS a key (rfc-server §6.2, #452): any
@@ -2957,6 +3001,15 @@ export const sigxModuleTypes = `declare module "sigx" {
     	(...args: A): R | Promise<R>;
     	/** Build-stamped stable key (\`<stableId>/<name>\`). */
     	__sigxKey: string;
+    	/**
+    	 * The per-call options channel a wrapped server function carries
+    	 * (\`fn.with({ signal })\`); the default fetcher threads the cell's abort
+    	 * signal through it when present. Optional: a hand-built ref without
+    	 * one is called directly.
+    	 */
+    	with?(options: {
+    		signal?: AbortSignal;
+    	}): (...args: A) => R | Promise<R>;
     }
     export interface AsyncFetcherContext {
     	/**
@@ -3093,8 +3146,9 @@ export const sigxModuleTypes = `declare module "sigx" {
      *  \`'["<stableId>/<name>"]'\`, default fetcher \`() => fn()\`. */
     export declare function useData<R>(fn: ServerFnDataRef<[
     ], R>, opts?: AsyncOptions): AsyncState<Awaited<R>>;
-    /** Reactive server-fn tuple key: \`() => [fn, ...args]\`; falsy ⇒ idle.
-     *  Default fetcher \`fn(...args)\`; args are the fn's own parameters. */
+    /** Reactive server-fn tuple key: \`() => [fn, input]\`; falsy ⇒ idle.
+     *  Default fetcher \`fn(input)\`; the tuple is \`[fn]\` or \`[fn, input]\`
+     *  (a server function takes one input, rfc-server-v5 §1.1). */
     export declare function useData<A extends KeyTuple, R>(key: () => readonly [
     	ServerFnDataRef<A, R>,
     	...A
@@ -3201,63 +3255,62 @@ export const sigxModuleTypes = `declare module "sigx" {
     	readonly value: string;
     };
     /**
-     * Composing props from several sources.
+     * Read the value stored under \`key\` in the page's \`__SIGX_ASYNC__\` blob —
+     * the READ half of the blob's public contract (#449; \`docs/seams.md\`).
      *
-     * Forwarding a component's leftover props onto its root element is plain JS —
-     * \`const { color, ...rest } = ctx.props\` then \`<button {...rest} />\`. What
-     * plain JS cannot do is *combine* two sources: a JSX spread is lowered by the
-     * compiler into a single object literal before the runtime sees anything, so
-     * \`<button {...rest} {...bag} />\` lets later keys clobber earlier ones. If the
-     * consumer and the component both set \`class\`, one is lost; same for
-     * \`onClick\`; and \`onClick\` vs \`onclick\` land in the same DOM listener slot.
+     * The blob is the page's data cache for its lifetime: the server fills it
+     * (\`ctx.registerSerializedState\` is the public writer) and successful keyed
+     * client fetches write back into it, so a state-owning pack seeding from it
+     * gets the latest value regardless of which side produced it. Reading does
+     * NOT consume: the entry stays for every later mount that asks — the
+     * default every first-party reader (\`useData\`, \`useStream\`, \`@sigx/cache\`)
+     * relies on. A pack whose seed must not outlive its own instance pairs the
+     * read with {@link invalidateRestored}; that is an opt-in, never the default,
+     * because a consuming reader starves every later instance under islands and
+     * separately-upgraded resume boundaries.
      *
-     * No runtime change can recover what the compiler already discarded, which is
-     * why this one function exists.
+     * - \`hit\` is own-key membership, not truthiness: a transferred \`null\` (or a
+     *   codec-carried \`undefined\`) is a hit.
+     * - Servers get a miss unconditionally — the accessors gate on
+     *   \`isLiveClient()\` (#407), so a long-lived Node process never leaks one
+     *   request's blob into another. Windowless live clients (lynx, terminal)
+     *   declare themselves via \`declareLiveClient(true)\`.
+     * - THE decode point for the seam: the boundary codec is applied here and
+     *   nowhere else (\`@sigx/cache\` reads through this too). Decoding stays
+     *   idempotent because the blob is a MIXED store — server-encoded values sit
+     *   beside live ones \`writeBack\` put there (\`reviveWithHandlers\` returns
+     *   non-plain objects untouched — #369).
+     * - **The value is shared with the blob, not a private copy.** Plain JSON
+     *   happens to be rebuilt by the codec walk, but a live value written back
+     *   after a client fetch — a \`Map\`, a \`Set\`, a class instance, anything the
+     *   codec leaves untouched — comes back by reference, and nothing in this
+     *   contract promises otherwise. A pack that turns the value into reactive
+     *   state must copy it first: a store proxying the blob's own objects writes
+     *   its mutations straight back into the blob, and from there into every
+     *   instance seeded afterwards.
      */
-    /** A source of props: an object, a thunk returning one, or nothing. */
-    export type MergeSource = Record<string, any> | (() => Record<string, any>) | null | undefined;
+    export declare function peekRestored(key: string): {
+    	hit: boolean;
+    	value: unknown;
+    };
     /**
-     * Merge several prop sources into one.
+     * Drop the entry stored under \`key\` — the INVALIDATE half of the blob's
+     * public contract (#449; \`docs/seams.md\`).
      *
-     * Ordinary keys follow **exact JS spread semantics**: the last source with the
-     * key as an own key wins, including when its value is an explicit \`undefined\`.
-     * This replaces a \`{...a, ...b}\` spread, so it must behave like one — it is
-     * deliberately *not* a defaults helper (destructuring with defaults already
-     * covers that).
+     * The cache calls this before fetching fresh data, so a later mount fetches
+     * instead of restoring a value that is no longer the truth. A state-owning
+     * pack calls it right after {@link peekRestored} to give a seed
+     * instance scope (consume-once) — \`@sigx/store\`'s \`ssrState(ctx, slice,
+     * { scope: 'instance' })\` is that opt-in; leaving the entry in place is the
+     * default, because the blob is a page-lifetime cache every later instance
+     * seeds from. A no-op for a missing key, and on the server (\`isLiveClient()\`
+     * gate, #407).
      *
-     * Four kinds of key are combined rather than overwritten:
-     *
-     * - **\`class\` / \`className\`** — concatenated in argument order, non-empty
-     *   values only, emitted as \`class\`.
-     * - **\`style\`** — merged left-to-right into an object; string sources are
-     *   parsed first. An object beats a string downstream: \`patchProp\` diffs it
-     *   per property and handles custom properties, and SSR stringifies it.
-     * - **\`on*\` handlers** — chained in source order, and grouped by the event
-     *   they resolve to, so \`onClick\` and \`onclick\` become **one** entry under the
-     *   first spelling seen. Two keys can then never reach the same invoker slot.
-     * - **\`ref\`** — chained into one ref that feeds every source's ref.
-     *
-     * Chaining cannot express *swallow*: a component that gates a consumer handler
-     * (dropping \`onClick\` while disabled) must keep destructuring it out and
-     * calling it itself.
-     *
-     * @example Hoist the call into setup — see the note on identity below.
-     * \`\`\`tsx
-     * const merged = mergeProps(
-     *     () => { const { variant: _v, ...rest } = ctx.props; return rest; },
-     *     () => ({ class: 'btn', onClick: onActivate })
-     * );
-     * return () => <button {...merged}>{slots.default?.()}</button>;
-     * \`\`\`
-     *
-     * The returned object resolves on read, so thunk sources stay reactive: a
-     * render that spreads it reads through to \`ctx.props\` and tracks as usual.
-     * Calling \`mergeProps\` **once in setup** also keeps the derived \`ref\` and
-     * chained handlers identity-stable across renders — rebuilding them per render
-     * hands the renderer a fresh function every time, which makes it tear down and
-     * re-apply refs for no reason.
+     * Pattern-driven invalidation across mounted cells AND the blob is
+     * \`invalidateKeys(patterns)\` (\`@sigx/runtime-core/internals\`), which sweeps
+     * both halves — this function is the blob half only.
      */
-    export declare function mergeProps(...sources: MergeSource[]): Record<string, any>;
+    export declare function invalidateRestored(key: string): void;
     /**
      * Component type checking utilities
      *
@@ -3287,6 +3340,16 @@ export const sigxModuleTypes = `declare module "sigx" {
      * \`\`\`
      */
     export declare function isComponent(type: unknown): type is ComponentLike;
+    export interface ErrorScopeOptions {
+    	/** Rendered in place of the subtree while errored. Omitted ⇒ renders nothing. */
+    	fallback?: (error: Error, retry: () => void) => JSXElement;
+    	/** Observer — called before the fallback renders. Its own throws are swallowed. */
+    	onError?: (error: Error, instance: ComponentInstance | null, info: string) => void;
+    }
+    /**
+     * Scope the calling component's subtree. Setup-only.
+     */
+    export declare function errorScope(options: ErrorScopeOptions): void;
     /**
      * Structured error system for SignalX runtime.
      *
@@ -3354,16 +3417,86 @@ export const sigxModuleTypes = `declare module "sigx" {
      */
     export declare function requiredInjectableNotProvidedError(name: string, hint?: string): SigxError;
     export declare function provideInvalidInjectableError(): SigxError;
-    export interface ErrorScopeOptions {
-    	/** Rendered in place of the subtree while errored. Omitted ⇒ renders nothing. */
-    	fallback?: (error: Error, retry: () => void) => JSXElement;
-    	/** Observer — called before the fallback renders. Its own throws are swallowed. */
-    	onError?: (error: Error, instance: ComponentInstance | null, info: string) => void;
-    }
     /**
-     * Scope the calling component's subtree. Setup-only.
+     * Append type handlers on an app context at install time.
+     *
+     * Accumulating: multiple packs can each contribute handlers; earlier-installed
+     * handlers are consulted first, and all of them before \`@sigx/serialize\`'s
+     * built-in vocabulary — so a pack can own a type the built-ins also cover. The
+     * parameter is structurally typed so packs don't need the AppContext type:
+     *
+     * \`\`\`ts
+     * install(app) {
+     *     provideTypeHandlers(app._context, [defineTypeHandler({
+     *         name: 'money', tag: '\$money',
+     *         test: (v): v is Money => v instanceof Money,
+     *         serialize: (m) => m.cents,           // m: Money
+     *         revive: (cents) => new Money(cents), // cents: number
+     *     })]);
+     * }
+     * \`\`\`
      */
-    export declare function errorScope(options: ErrorScopeOptions): void;
+    export declare function provideTypeHandlers(appContext: {
+    	provides: Map<symbol, unknown>;
+    }, handlers: TypeHandler[]): void;
+    /**
+     * Composing props from several sources.
+     *
+     * Forwarding a component's leftover props onto its root element is plain JS —
+     * \`const { color, ...rest } = ctx.props\` then \`<button {...rest} />\`. What
+     * plain JS cannot do is *combine* two sources: a JSX spread is lowered by the
+     * compiler into a single object literal before the runtime sees anything, so
+     * \`<button {...rest} {...bag} />\` lets later keys clobber earlier ones. If the
+     * consumer and the component both set \`class\`, one is lost; same for
+     * \`onClick\`; and \`onClick\` vs \`onclick\` land in the same DOM listener slot.
+     *
+     * No runtime change can recover what the compiler already discarded, which is
+     * why this one function exists.
+     */
+    /** A source of props: an object, a thunk returning one, or nothing. */
+    export type MergeSource = Record<string, any> | (() => Record<string, any>) | null | undefined;
+    /**
+     * Merge several prop sources into one.
+     *
+     * Ordinary keys follow **exact JS spread semantics**: the last source with the
+     * key as an own key wins, including when its value is an explicit \`undefined\`.
+     * This replaces a \`{...a, ...b}\` spread, so it must behave like one — it is
+     * deliberately *not* a defaults helper (destructuring with defaults already
+     * covers that).
+     *
+     * Four kinds of key are combined rather than overwritten:
+     *
+     * - **\`class\` / \`className\`** — concatenated in argument order, non-empty
+     *   values only, emitted as \`class\`.
+     * - **\`style\`** — merged left-to-right into an object; string sources are
+     *   parsed first. An object beats a string downstream: \`patchProp\` diffs it
+     *   per property and handles custom properties, and SSR stringifies it.
+     * - **\`on*\` handlers** — chained in source order, and grouped by the event
+     *   they resolve to, so \`onClick\` and \`onclick\` become **one** entry under the
+     *   first spelling seen. Two keys can then never reach the same invoker slot.
+     * - **\`ref\`** — chained into one ref that feeds every source's ref.
+     *
+     * Chaining cannot express *swallow*: a component that gates a consumer handler
+     * (dropping \`onClick\` while disabled) must keep destructuring it out and
+     * calling it itself.
+     *
+     * @example Hoist the call into setup — see the note on identity below.
+     * \`\`\`tsx
+     * const merged = mergeProps(
+     *     () => { const { variant: _v, ...rest } = ctx.props; return rest; },
+     *     () => ({ class: 'btn', onClick: onActivate })
+     * );
+     * return () => <button {...merged}>{slots.default?.()}</button>;
+     * \`\`\`
+     *
+     * The returned object resolves on read, so thunk sources stay reactive: a
+     * render that spreads it reads through to \`ctx.props\` and tracks as usual.
+     * Calling \`mergeProps\` **once in setup** also keeps the derived \`ref\` and
+     * chained handlers identity-stable across renders — rebuilding them per render
+     * hands the renderer a fresh function every time, which makes it tear down and
+     * re-apply refs for no reason.
+     */
+    export declare function mergeProps(...sources: MergeSource[]): Record<string, any>;
     /** Check whether a value is thenable (Promise-like). */
     export declare function isPromise(value: any): boolean;
     /** @deprecated Use the {@link isPromise} function export instead. Kept until dependents (e.g. @sigx/store) migrate. */

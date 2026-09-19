@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-19
+
 ### Changed
 
 - **Aligned with SignalX core 1.0** ([#83](https://github.com/signalxjs/live-code/issues/83)). The pnpm catalog moves `sigx` and `@sigx/vite` to `^1.0.0`, and the tier-1 sibling peers follow the versions just published (each one minor up):

@@ -159,6 +159,30 @@ describe('progressive enhancement — run on view (#34)', () => {
     });
 });
 
+describe('progressive enhancement — observer lifetime (#88)', () => {
+    it('keeps watching the DOM after a garbage collection', async () => {
+        // happy-dom <= 20.10.3 held a MutationObserver's callback only through a
+        // WeakRef, so every observer stopped firing at whichever GC came next
+        // (fixed in 20.14.5). Force that GC deterministically to guard against
+        // a regression.
+        const { setFlagsFromString } = await import('node:v8');
+        const { runInNewContext } = await import('node:vm');
+        setFlagsFromString('--expose-gc');
+        const gc = runInNewContext('typeof gc === "function" ? gc : undefined') as (() => void) | undefined;
+        if (!gc) throw new Error('Cannot force a GC here: --expose-gc could not be enabled');
+        // Let any pending timer from an earlier test's navigation drain first,
+        // so only the MutationObserver can pick up the block appended below.
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        gc();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        gc();
+
+        document.body.appendChild(makeBlock('AFTER_GC'));
+        await enhanced();
+        expect(runCodeSpy.mock.calls[0][0]).toBe('AFTER_GC');
+    });
+});
+
 describe('progressive enhancement — delegated interactions', () => {
     it('switches the visible pane when a tab is clicked', async () => {
         const block = makeBlock('CODE', { tabs: ['preview', 'code'] });

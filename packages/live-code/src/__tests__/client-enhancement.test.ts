@@ -161,13 +161,15 @@ describe('progressive enhancement — run on view (#34)', () => {
 
 describe('progressive enhancement — observer lifetime (#88)', () => {
     it('keeps watching the DOM after a garbage collection', async () => {
-        // happy-dom (unlike browsers) holds a MutationObserver's callback only
-        // through a WeakRef, so an observer nothing else references stops
-        // firing at whichever GC comes next. Force that GC deterministically.
+        // happy-dom <= 20.10.3 held a MutationObserver's callback only through a
+        // WeakRef, so every observer stopped firing at whichever GC came next
+        // (fixed in 20.14.5). Force that GC deterministically to guard against
+        // a regression.
         const { setFlagsFromString } = await import('node:v8');
         const { runInNewContext } = await import('node:vm');
         setFlagsFromString('--expose-gc');
-        const gc = runInNewContext('gc') as () => void;
+        const gc = runInNewContext('typeof gc === "function" ? gc : undefined') as (() => void) | undefined;
+        if (!gc) throw new Error('Cannot force a GC here: --expose-gc could not be enabled');
         // Let any pending timer from an earlier test's navigation drain first,
         // so only the MutationObserver can pick up the block appended below.
         await new Promise((resolve) => setTimeout(resolve, 120));
